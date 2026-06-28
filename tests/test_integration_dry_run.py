@@ -246,10 +246,11 @@ def test_hard_gate_task_missing_key_diffs_blocks_complete(tmp_path: Path) -> Non
 
     coord.run_until_human_or_terminal(max_ticks=10)
 
-    # task 自检通过 (tests_green), 但 key-diffs 硬 gate 缺 → 收口自检 fail
-    # 走到 WRAPPING_UP (auto submit_wrap_up), 但 human_pending 不设 (不通过)
+    # task 自检通过 (tests_green), 但 key-diffs 硬 gate 缺 → 收口自检 fail.
+    # §A4 修复: 收口失败也 set human_pending=wrap_up_signoff, 让 run_until_human_or_terminal
+    # 退出循环 (否则空转 hang). 人看到 check-result.json 后 signoff_wrap_up(False) 回 IMPLEMENTING 返工.
     assert coord.state.phase == Phase.WRAPPING_UP
-    assert coord.state.human_pending is None  # 收口自检没过, 不进 signoff
+    assert coord.state.human_pending == HumanPending.wrap_up_signoff
 
     # wrap-up/check-result.json 应含 all_hard_gates_pass = false
     result = (run_dir / "wrap-up" / "check-result.json").read_text(encoding="utf-8")

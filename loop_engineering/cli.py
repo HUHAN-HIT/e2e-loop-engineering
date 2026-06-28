@@ -175,6 +175,14 @@ def cmd_install_claude(args, runs_root: Path) -> int:
     print(f"installed: {len(result.installed)}, skipped: {len(result.skipped)}")
     if result.skipped and not args.force:
         print("已有文件已保留; 如需覆盖旧安装, 重新运行 --force")
+    print(
+        "提示: hooks 运行依赖 loop_engineering 包 (+pydantic/pyyaml); "
+        "请确保运行 hook 的 python 环境已 `pip install loop-engineering`,"
+    )
+    print(
+        "      否则 loop 运行期的 SSOT 校验不可用 "
+        "(无活跃 run 时 hook 会自动放行, 不影响日常编辑)。"
+    )
     return 0
 
 
@@ -262,8 +270,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ab.set_defaults(func=cmd_abort)
 
     # install-claude
-    p_ic = sub.add_parser("install-claude", help="同步 Claude Code skill/agents/hooks/settings 到项目 .claude/")
-    p_ic.add_argument("--project-dir", default=".", help="目标项目根目录 (默认当前目录)")
+    p_ic = sub.add_parser("install-claude", help="同步 Claude Code skill/agents/hooks/settings 到目标项目 .claude/")
+    p_ic.add_argument("--project-dir", required=True, help="目标项目根目录; 必须显式指定, 避免误装到 loop-engineering 实现仓库")
     p_ic.add_argument("--force", action="store_true", help="覆盖已有 .claude 资产")
     p_ic.set_defaults(func=cmd_install_claude)
 

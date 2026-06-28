@@ -7,8 +7,24 @@
 | 层 | 路径 | 职责 |
 | --- | --- | --- |
 | **skill (协调器提示词)** | `.claude/skills/loop-engineering/SKILL.md` | 主 agent 加载后即 coordinator, 推状态机、跑客观自检、在两个锚点交还给人 |
+| **craft 标准层** | `.claude/skills/loop-engineering/standards/*.md` | 各阶段"怎么做才算好"的判据/正反例/样例; 由 SKILL.md 与各子 agent 一行指针按需引用 |
 | **subagents (4 个角色)** | `.claude/agents/*.md` | 由主 agent 通过 Task 工具按阶段分发, 隔离上下文产出 worker 产物 |
-| **Python 算法 SSOT** | `outputs/loop_engineering/loop_engineering/` | 协作式判断原语的可执行参考库 (路径相交 / checks 文法 / 保守扩围 / 契约 diff 等) |
+| **Python 算法 SSOT** | 已安装包中的 `loop_engineering/` | 协作式判断原语的可执行参考库 (路径相交 / checks 文法 / 保守扩围 / 契约 diff 等) |
+
+## craft 标准层 (standards/)
+
+`SKILL.md` + Python SSOT 规定了**状态机、产物 schema、客观门禁**(what + 红线); `standards/` 补上**"怎么做才算好"**(how-well) —— 这是信条 2「预防 > 检测」要求重投入、但此前未操作化的一层。
+
+| 文件 | 关闭的缺口 |
+| --- | --- |
+| `glossary.md` | 客观可判定 / 阻塞性歧义 / 关键 diff / service 边界 / 任务粒度 的操作定义 + 反例 |
+| `clarification-standard.md` | 该问/不该问、默认假设质量栏、问题上限 |
+| `plan-standard.md` | AC 写法 + ID 规约、design.md 章节、拆分粒度判据、DAG 范式、task-plan 样例 |
+| `test-design-standard.md` | AC→scenario→checks→代码 推导链、覆盖规则 (分档)、可机械判定断言反例 |
+| `implementation-standard.md` | 测试写法约定、tests_green 操作定义、key-diffs "关键"判据、amend vs 硬做边界 |
+| `review-standard.md` | 真 blocker vs 噪音、blocking_value 质量栏、severity 分级 |
+
+**原则:** 每条规则带 `[S][M][C]` 复杂度档标记, simple 不套 complex (摩擦匹配复杂度); 标准是**指导 (Skill-first)**, 不是新增门禁或人盯点 —— 唯一门禁仍是 SKILL §6 的三组客观自检。standards 不重新引入任何对抗式/防伪机器。
 
 ## 子 agent 与阶段映射
 
@@ -46,7 +62,7 @@
 ## 测试入口
 
 ```powershell
-cd outputs\loop_engineering
+loop-eng install-claude --project-dir <target-project> --force
 .\.venv\Scripts\Activate.ps1   # 或 python -m venv .venv 后安装
 pytest                          # 265+ 测试覆盖算法 SSOT
 ```

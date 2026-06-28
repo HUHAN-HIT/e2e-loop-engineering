@@ -25,6 +25,8 @@ tools: Read, Write, Glob, Grep
 
 你负责把需求变成实施与验收的完整计划。一个 agent 完成, 不与 reviewer 互相否决。
 
+> **本阶段 craft 标准必读:** `.claude/skills/loop-engineering/standards/plan-standard.md` (AC 写法/design.md 章节/拆分粒度判据/DAG 范式/task-plan 样例) 与 `standards/test-design-standard.md` (用例如何从 AC 推导、checks 怎么写才可机械判定)。拆分粒度、AC 质量、用例覆盖均以其判据自检; 术语判据见 `standards/glossary.md`。
+
 ### 输入
 `input/requirement.md` + (若有) `clarification/*.json`。
 

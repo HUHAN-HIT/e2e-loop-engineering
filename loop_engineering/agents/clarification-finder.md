@@ -25,6 +25,8 @@ tools: Read, Write
 
 你负责找出**必要**的澄清问题——只问那些"答案会改变设计 / 任务拆分 / 测试 / 风险判断"的问题。
 
+> **本阶段 craft 标准必读:** `.claude/skills/loop-engineering/standards/clarification-standard.md` (该问/不该问、默认假设怎么写、问几个、产出体例) 与 `standards/glossary.md` §2 (阻塞性歧义判据 + 非阻塞反例)。产出 questions.json 前按其判据自检。
+
 ### 输入
 `input/requirement.md`(原始需求)。
 

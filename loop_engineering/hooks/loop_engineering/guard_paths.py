@@ -148,8 +148,8 @@ def _rule_source(rel: str, phase: str, active_task) -> str | None:
     if rel.startswith("runs/"):
         # runs/ 下但没被前 6 条匹配 (如 runs/<id>/ 不规范路径) → deny
         return f"runs/ 内未识别子路径: {rel}"
-    if rel.startswith("outputs/loop_engineering/"):
-        return "保护 Python SSOT (outputs/loop_engineering/) — 不可改"
+    if rel.startswith("loop_engineering/") or rel.startswith("outputs/loop_engineering/"):
+        return "保护 Python SSOT (loop_engineering/ 或旧 outputs/loop_engineering/) — 不可改"
     if phase != "IMPLEMENTING":
         return (
             f"源码写入被拒: 当前 phase={phase}, 仅 IMPLEMENTING 可写源码 "
@@ -190,18 +190,29 @@ def main() -> int:
             emit_pass_silent()
             return 0
 
-        # 规则 1: .claude/**
+        run_dir = common.active_run_dir()
+        state = safe_read_run_state(run_dir) if run_dir is not None else None
+        plan = safe_read_task_plan(run_dir) if run_dir is not None else None
+        phase = _phase_value(state)
+
+        # 仅在存在"治理中的活跃 run"时才执行写路径白名单; 否则一律静默放行:
+        #   - 无 run (runs/ 空 / 未 init)          → 普通项目的日常编辑, 不该被拦 (修复 #1)
+        #   - run-state 缺失/不可解析 / loop_engineering SSOT 不可导入
+        #     (safe_read_run_state 返回 None)      → 无法可靠治理, 退化放行 (兼顾 #2 缺包)
+        #   - phase ∈ {COMPLETE, ABORTED, ""}      → run 已终态, 不再治理写入
+        # 这样装进真实项目后, loop 之外的编辑不受影响; 只有 run 进行中才收紧。
+        GOVERNING_PHASES = {"CREATED", "CLARIFYING", "PLANNING", "IMPLEMENTING", "WRAPPING_UP"}
+        if run_dir is None or state is None or phase not in GOVERNING_PHASES:
+            emit_pass_silent()
+            return 0
+
+        # 规则 1: .claude/** (仅在 run 治理期保护 skill/agent/hook 自身不被 worker 改)
         msg = _rule_claude(rel)
         if msg is not None:
             if msg == "ALLOW":
                 emit_pass_silent()
                 return 0
             return emit_block(f"路径白名单拒绝: {p} ({msg})")
-
-        run_dir = common.active_run_dir()
-        state = safe_read_run_state(run_dir) if run_dir is not None else None
-        plan = safe_read_task_plan(run_dir) if run_dir is not None else None
-        phase = _phase_value(state)
 
         # 规则 2: run-state.*
         msg = _rule_run_state(rel)

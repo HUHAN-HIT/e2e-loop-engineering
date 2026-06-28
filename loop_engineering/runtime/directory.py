@@ -61,6 +61,8 @@ def write_run_state(run_dir: Path, state: RunState) -> None:
     """原子写 run-state.json (写到 tmp 再 rename, 防半写状态).
 
     单写者约束由 coordinator 维护, 本函数不强制加锁.
+    Windows 文件锁竞态: os.replace 偶发 PermissionError (杀软扫描 / 句柄未释放),
+    重试 5 次 (每次退避 25ms), 仍失败才抛.
     """
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -73,7 +75,7 @@ def write_run_state(run_dir: Path, state: RunState) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(payload)
-        os.replace(tmp_path, target)
+        _atomic_replace(tmp_path, target)
     except Exception:
         # 出错清掉 tmp, 不留垃圾
         try:
@@ -81,6 +83,26 @@ def write_run_state(run_dir: Path, state: RunState) -> None:
         except OSError:
             pass
         raise
+
+
+def _atomic_replace(src: Path, dst: Path, *, retries: int = 5, backoff_ms: int = 25) -> None:
+    """Windows 友好的原子替换: 失败重试, 处理杀软 / 文件锁竞态."""
+    import time
+    last_err: Exception | None = None
+    for i in range(retries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as e:
+            last_err = e
+            if i < retries - 1:
+                time.sleep(backoff_ms / 1000)
+        except OSError as e:
+            last_err = e
+            if i < retries - 1:
+                time.sleep(backoff_ms / 1000)
+    assert last_err is not None
+    raise last_err
 
 
 def read_run_state(run_dir: Path) -> RunState:

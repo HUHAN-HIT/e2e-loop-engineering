@@ -20,7 +20,9 @@ worker 任务通过 **Task 工具** 分发给 4 个子 agent:
 
 分发时, 把对应 packet 作为 Task 工具的首条消息发给子 agent; 收回的只是产物文件路径 + summary, **不要把子 agent 的长日志拉回主上下文**.
 
-**算法真理来源 (SSOT):** 本 skill 中提到的判断原语 (路径相交、checks 文法评估、保守扩围等) 以 `outputs/loop_engineering/loop_engineering/` 下 Python 包的实现为参考 —— 那是规范源的可执行版. 提示词引用 SSOT 处都用脚注形式标出 (`loop_engineering/<subpkg>/<file>.py:<function>`), 你按描述执行即可, **不需要真的运行 Python**.
+**算法真理来源 (SSOT):** 本 skill 中提到的判断原语 (路径相交、checks 文法评估、保守扩围等) 以 当前安装包中的 `loop_engineering/` Python 包实现为参考 —— 那是规范源的可执行版. 提示词引用 SSOT 处都用脚注形式标出 (`loop_engineering/<subpkg>/<file>.py:<function>`), 默认按描述执行; 当 hook/CLI 可用时, 以 Python SSOT 的机械检查结果为准.
+
+**craft 标准层 (`standards/`):** 各阶段"怎么做才算好"的判据、正/反例与样例放在本 skill 的 `standards/` 子目录 —— `glossary.md` (客观可判定/阻塞性歧义/关键 diff/service 边界/任务粒度的操作定义) + 五份阶段标准 (clarification / plan / test-design / implementation / review)。**Python SSOT 定义"机械检查怎么算", craft 标准定义"产出时怎么算做对了"**, 两者互补。每条规则带 `[S][M][C]` 复杂度档标记 —— simple 需求不要套 complex 标准, 摩擦匹配复杂度。分发各 worker 时其提示词已指向对应标准; 你 (coordinator) 跑客观自检时也可回指 `standards/glossary.md` 的操作定义来消除"靠语感判断"。
 
 ---
 
@@ -85,7 +87,7 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 
 ### 阶段 1 · 澄清(CLARIFYING,多数 run 跳过)
 
-仅当存在**阻塞性歧义**(不澄清就无法定验收口径,或必然返工)才进入。规则:
+仅当存在**阻塞性歧义**(不澄清就无法定验收口径,或必然返工)才进入。craft 判据见 `standards/clarification-standard.md` 与 `standards/glossary.md` §2。规则:
 
 - 只问"答案会改变设计/拆分/测试/风险"的问题;删掉一切 nice-to-have。
 - 每个问题给一个**可直接采纳的默认假设**,让人能跳过回答。
@@ -99,7 +101,7 @@ dispatch `.claude/agents/clarification-finder.md`, 产出 `clarification/questio
 
 ### 阶段 2 · 计划(PLANNING)
 
-dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**不引入 reviewer 互相否决**:
+dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**不引入 reviewer 互相否决**(AC 写法/拆分粒度/DAG 见 `standards/plan-standard.md`, 用例设计见 `standards/test-design-standard.md`):
 
 1. `planning/design.md`:简明设计。不写任何防伪/对抗机制。
 2. `planning/task-plan.yaml`:任务拆分 + 每个 task 的测试设计(schema 见 §9)。complex 必须拆成 DAG,每个 task 小到一个角色能独立持有上下文。
@@ -119,7 +121,7 @@ dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**
 
 ### 阶段 3 · 实施(IMPLEMENTING)
 
-按 task DAG 的 **ready frontier** 渐进推进。task **四态**:`pending` / `running`(已派出未交回)/ `blocked`(二次自检失败或二次 stale, 待人接手)/ `complete`(交回且自检通过)。两层状态机(run 级 phase ↔ task.status)的同步顺序见设计 §3.7(ABORTED 优先于 watchdog)。worker 超时(阈值默认 simple 15 / medium 30 / complex 60 分钟, 可在 `run-state.config.watchdog_timeout_min` 调)/崩溃未交回 → 退回 `pending` 重派并作废本次派发(给一个 attempt 序号);被判超时的旧派发若迟到交回,**丢弃不用**。watchdog 决策逻辑参考 `loop_engineering/scheduling/watchdog.py:watchdog_tick` 与同模块 `detect_stale_tasks`.
+按 task DAG 的 **ready frontier** 渐进推进(测试写法/tests_green 定义/key-diffs 关键判据见 `standards/implementation-standard.md`)。task **四态**:`pending` / `running`(已派出未交回)/ `blocked`(二次自检失败或二次 stale, 待人接手)/ `complete`(交回且自检通过)。两层状态机(run 级 phase ↔ task.status)的同步顺序见设计 §3.7(ABORTED 优先于 watchdog)。worker 超时(阈值默认 simple 15 / medium 30 / complex 60 分钟, 可在 `run-state.config.watchdog_timeout_min` 调)/崩溃未交回 → 退回 `pending` 重派并作废本次派发(给一个 attempt 序号);被判超时的旧派发若迟到交回,**丢弃不用**。watchdog 决策逻辑参考 `loop_engineering/scheduling/watchdog.py:watchdog_tick` 与同模块 `detect_stale_tasks`.
 
 每轮选可启动的 task (ready frontier 形式定义参考 `loop_engineering/scheduling/ready_frontier.py:ready_frontier`):
 ```
@@ -262,7 +264,7 @@ runs/<run_id>/
 
 ## 11. 按需红队(非常驻)
 
-对抗式审查不是常驻阶段,而是**按需工具**。仅在两种情况启动:① 人主动要求("这个改动风险高,红队一下");② 某 task `risk: high` 在收口前。dispatch `.claude/agents/red-team-reviewer.md`, 对指定改动找**真正会阻塞**的问题(破坏哪条 AC/状态/契约),给结构化 finding。审完即退,不进入多轮自循环。日常 task 不经过红队。
+对抗式审查不是常驻阶段,而是**按需工具**(真 blocker vs 噪音判据见 `standards/review-standard.md`)。仅在两种情况启动:① 人主动要求("这个改动风险高,红队一下");② 某 task `risk: high` 在收口前。dispatch `.claude/agents/red-team-reviewer.md`, 对指定改动找**真正会阻塞**的问题(破坏哪条 AC/状态/契约),给结构化 finding。审完即退,不进入多轮自循环。日常 task 不经过红队。
 
 ## 12. trust_mode(信任档位,运行时开关)
 

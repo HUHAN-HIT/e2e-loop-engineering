@@ -197,6 +197,24 @@ class Coordinator:
             return True
         return any(t.service or t.provides_contracts or t.consumes_contracts for t in self.plan.tasks)
 
+    def _read_integration_results(self) -> dict[str, bool] | None:
+        """读 wrap-up/integration-results.json (人/CI 在收口前手动填).
+
+        格式: {"case_id": true/false, ...}. 文件不存在 → None (留给 check_wrap_up
+        按 requires_integration 决定软 pass 或 fail).
+        """
+        path = self.run_dir / "wrap-up" / "integration-results.json"
+        if not path.exists():
+            return None
+        import json
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        return {str(k): bool(v) for k, v in data.items()}
+
     def signoff_plan(self, accepted: bool, *, feedback: str = "") -> None:
         """人盯点 1. accepted=True → clear anchor + → IMPLEMENTING; False → 留 PLANNING."""
         if self.state.phase != Phase.PLANNING:
@@ -228,11 +246,24 @@ class Coordinator:
         if self.plan is None:
             raise RuntimeError("submit_wrap_up 时 plan 为空")
         self.state = advance_phase(self.state, Phase.WRAPPING_UP)
-        # 跑收口自检
+        # 跑收口自检. §A5 修复: scope / integration 真正起作用.
+        # - planned_scope: 全 task allowed_write_paths 展平
+        # - actual_scope: earlier_task_writes 累积的实际写入展平
+        # - integration_results: 从 wrap-up/integration-results.json 读 (人/CI 手动填)
+        planned_scope = sorted(
+            {p for t in self.plan.tasks for p in t.allowed_write_paths}
+        )
+        actual_scope = sorted(
+            {p for writes in self.earlier_task_writes.values() for p in writes}
+        )
+        integration_results = self._read_integration_results()
         result = check_wrap_up(
             self.plan,
             self._task_check_results,
             self._key_diffs_by_task,
+            integration_results=integration_results,
+            planned_scope_files=planned_scope,
+            actual_scope_files=actual_scope,
             requires_integration=self._requires_integration_results(),
         )
         # 写结果到 wrap-up/check-result.json
@@ -248,21 +279,39 @@ class Coordinator:
             ),
             encoding="utf-8",
         )
-        if result.all_pass:
-            self.state = set_human_pending(self.state, HumanPending.wrap_up_signoff)
-        else:
-            # 不通过: 不进 signoff, 留 WRAPPING_UP 等人/agent 修.
-            # human_pending 保持 None, 让 caller 决定下一步 (回 PLANNING 或修代码).
-            pass
+        # 不论通过与否, 都 set human_pending=wrap_up_signoff, 让 run_until_human_or_terminal
+        # 退出循环 (§A4 修复). 失败时 phase=WRAPPING_UP + human_pending=None 会导致 tick 空转
+        # 直到 max_ticks hang.
+        # 通过 → 人 approve 后 → COMPLETE; 不通过 → 人看到 check-result.json 后 reject → 回 IMPLEMENTING.
+        self.state = set_human_pending(self.state, HumanPending.wrap_up_signoff)
         self._refresh_state_file()
 
     def signoff_wrap_up(self, accepted: bool) -> None:
-        """人盯点 2. accepted=True → → COMPLETE; False → 回 PLANNING/IMPLEMENTING."""
+        """人盯点 2. accepted=True → → COMPLETE; False → 回 IMPLEMENTING.
+
+        §A4 修复: accepted=True 时强制读 wrap-up/check-result.json 校验 all_pass.
+        自检未通过时拒绝签收, 防止跳过自检进入 COMPLETE.
+        """
         if self.state.phase != Phase.WRAPPING_UP:
             raise RuntimeError(
                 f"signoff_wrap_up 必须在 WRAPPING_UP phase (当前 {self.state.phase})"
             )
         if accepted:
+            # 校验收口自检必须通过, 不允许强签收.
+            check_path = self.run_dir / "wrap-up" / "check-result.json"
+            if check_path.exists():
+                import json
+                try:
+                    items = json.loads(check_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    items = []
+                failed = [i for i in items if not i.get("passed")]
+                if failed:
+                    raise RuntimeError(
+                        "signoff_wrap_up(accepted=True) 拒绝: 收口自检未通过 "
+                        f"({len(failed)} 项失败, 见 wrap-up/check-result.json). "
+                        "请先 signoff_wrap_up(False) 回 IMPLEMENTING 修."
+                    )
             self.state = clear_human_pending(self.state)
             self.state = advance_phase(self.state, Phase.COMPLETE)
             self._refresh_state_file()

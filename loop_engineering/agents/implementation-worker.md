@@ -25,6 +25,8 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 
 你负责实现**一个** task。只看你的 packet。
 
+> **本阶段 craft 标准必读:** `.claude/skills/loop-engineering/standards/implementation-standard.md` (测试写法约定/tests_green 操作定义/key-diffs "关键"判据/amend vs 硬做边界) 与 `standards/test-design-standard.md` (把 planned checks 落成测试)。关键 diff 判据见 `standards/glossary.md` §3。
+
 ### 输入 (coordinator 给的 packet)
 ```
 { task_id,

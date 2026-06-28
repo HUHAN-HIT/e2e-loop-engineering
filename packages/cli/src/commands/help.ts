@@ -14,6 +14,7 @@ export function printHelp(stream: NodeJS.WriteStream = process.stdout): void {
   install       安装 Claude Code / OpenCode 资产到目标项目 .claude/
   uninstall     卸载已安装的资产 (只删本工具装的)
   list          列出目标项目 .claude/ 下本工具管理的资产
+  hook <hook-name>  执行 Claude Code hook stdin/stdout 入口
   help          显示本帮助
 
 算法 dry-run 命令 (本地骨架验证, worker 用 echo 占位):
@@ -39,6 +40,9 @@ install 选项:
   --project-dir <path>  目标项目根目录 (缺省: 当前工作目录)
   --force               覆盖已存在的文件 (默认: 跳过冲突文件)
   --dry-run             只预览不写盘
+  --hook-mode <local|cli|auto>
+                       hook 安装模式; 默认 local
+  --cli-command <cmd>   cli 模式写入 settings 的命令前缀; 默认 e2e-loop
 
 uninstall 选项:
   --host <cc|oc|both>   必需。要卸载哪个 adapter 的产物 (both = 两套都卸)
@@ -64,6 +68,8 @@ dry-run 命令选项:
   e2e-loop install --host cc --project-dir ./my-project --force
   e2e-loop install --host cc --dry-run
   e2e-loop list --project-dir ./my-project
+  e2e-loop install --host cc --hook-mode cli --cli-command e2e-loop
+  e2e-loop hook guard-paths
   e2e-loop uninstall --host cc --project-dir ./my-project
   e2e-loop init ./req.md --runs-root ./runs
   e2e-loop plan 20260628-001 --design ./design.md --task-plan ./task-plan.yaml

@@ -2,10 +2,10 @@
  * OpenCode adapter 端到端回归测试 (P2-B go/no-go 门禁的一部分)。
  *
  * 目的: 守住 install_oc.test.ts (workspace src 形态) 覆盖不到的 "bundle 形态" 盲区——
- * adapter-oc 的 install.ts 被 tsup 打进 packages/cli/dist/index.mjs 后:
+ * adapter-oc 的 install.ts 被 tsup 打进 packages/cli/dist/index.js 后:
  *   1. repoRoot() 的 import.meta.url 逐级向上行走必须仍能命中含 core/manifest.json 的仓库根;
  *   2. adapter-oc 渲染 OC agent frontmatter 依赖的 js-yaml 必须一并 bundle 进 CLI
- *      (tsup.config.ts noExternal 含 "js-yaml"), 否则 `node cli/dist/index.mjs install --host oc`
+ *      (tsup.config.ts noExternal 含 "js-yaml"), 否则 `node cli/dist/index.js install --host oc`
  *      会因找不到 js-yaml 在运行时崩溃。
  *
  * 本测试用【构建后的真实 node bundle】跑一次 `install --host oc`, 断言:
@@ -51,7 +51,7 @@ function resolveRepoRoot(): string {
 }
 
 const REPO_ROOT = resolveRepoRoot();
-const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.mjs");
+const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 
 beforeAll(() => {
   // 构建确保 cli/dist 是最新产物 (含 adapter-oc + js-yaml bundle)。

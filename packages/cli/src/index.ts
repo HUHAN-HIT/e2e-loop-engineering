@@ -20,6 +20,7 @@ import { printHelp } from "./commands/help.js";
 import { runInstall } from "./commands/install.js";
 import { runUninstall } from "./commands/uninstall.js";
 import { runList } from "./commands/list.js";
+import { runHook } from "./commands/hook.js";
 import {
   runInit,
   runStatus,
@@ -88,6 +89,8 @@ async function main(): Promise<number> {
       return await runUninstall(args);
     case "list":
       return await runList(args);
+    case "hook":
+      return await runHook(args);
     // --- 算法 dry-run 类 (P5-M7B, 同步, 对齐 Python cli.py) ---
     // 这些命令调 Coordinator, 可能抛运行期错误 (如 run-state 缺失、收口 gate 未过的签收拒绝)。
     // 统一在 dryRunGuard 内捕获, 友好 stderr + exit 1, 不抛裸 stack。

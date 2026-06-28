@@ -53,7 +53,7 @@ function resolveRepoRoot(): string {
 }
 
 const REPO_ROOT = resolveRepoRoot();
-const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.mjs");
+const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 
 beforeAll(() => {
   execSync("npm run build", { cwd: REPO_ROOT, stdio: "pipe" });

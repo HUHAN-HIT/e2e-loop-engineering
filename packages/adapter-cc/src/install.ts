@@ -26,6 +26,7 @@ import type {
   UninstallResult,
 } from "@e2e-loop/shared";
 import settingsTemplate from "./templates/settings.json" with { type: "json" };
+import { toDashHookName } from "./hook_dispatcher.js";
 
 /** 4 个 hook 的逻辑名 (与 HookName 对齐; 与 .mjs 文件名 1:1)。 */
 const HOOK_NAMES = [
@@ -34,6 +35,72 @@ const HOOK_NAMES = [
   "post_task_collect",
   "guard_anchors",
 ] as const;
+type ClaudeHookMode = "local" | "cli";
+
+const DEFAULT_CLI_COMMAND = "e2e-loop";
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function resolveClaudeHookMode(ctx?: InstallContext): ClaudeHookMode {
+  if (ctx?.hookMode === "cli") return "cli";
+  if (ctx?.hookMode === "auto" && ctx.cliCommand) return "cli";
+  return "local";
+}
+
+function commandForHook(name: (typeof HOOK_NAMES)[number], ctx?: InstallContext): string {
+  if (resolveClaudeHookMode(ctx) === "cli") {
+    const cliCommand = ctx?.cliCommand?.trim() || DEFAULT_CLI_COMMAND;
+    return `${cliCommand} hook ${toDashHookName(name)}`;
+  }
+  return `node .claude/hooks/loop_engineering/${name}.mjs`;
+}
+
+function renderSettings(ctx?: InstallContext): Record<string, unknown> {
+  const rendered = cloneJson(settingsTemplate) as Record<string, unknown>;
+  const hooks = rendered.hooks as Record<string, Array<Record<string, unknown>>>;
+  const specs: Array<{ event: string; hook: (typeof HOOK_NAMES)[number] }> = [
+    { event: "SessionStart", hook: "probe_and_gate" },
+    { event: "PreToolUse", hook: "guard_paths" },
+    { event: "PostToolUse", hook: "post_task_collect" },
+    { event: "Stop", hook: "guard_anchors" },
+  ];
+  for (const spec of specs) {
+    const group = hooks[spec.event]?.[0];
+    const hookEntries = group?.hooks as Array<Record<string, unknown>> | undefined;
+    if (hookEntries?.[0]) {
+      hookEntries[0].command = commandForHook(spec.hook, ctx);
+    }
+  }
+  return rendered;
+}
+
+const LOOP_ENGINEERING_CLI_HOOK_RE =
+  /\bhook\s+(probe-and-gate|probe_and_gate|guard-paths|guard_paths|post-task-collect|post_task_collect|guard-anchors|guard_anchors)(\s|$)/;
+
+function isLoopEngineeringHookCommand(command: string): boolean {
+  const normalized = command.replaceAll("\\", "/");
+  if (normalized.includes(".claude/hooks/loop_engineering/")) return true;
+  if (!LOOP_ENGINEERING_CLI_HOOK_RE.test(normalized)) return false;
+  return /(^|\s)e2e-loop(\s|$)/.test(normalized) || /^node\s+/i.test(normalized);
+}
+
+function stripLoopEngineeringHooks(groups: unknown): unknown[] {
+  if (!Array.isArray(groups)) return [];
+  const keptGroups: unknown[] = [];
+  for (const group of groups as Array<Record<string, unknown>>) {
+    const hookEntries = Array.isArray(group?.hooks) ? group.hooks : [];
+    const keptHooks = hookEntries.filter((hook) => {
+      const command = (hook as Record<string, unknown>)?.command;
+      return typeof command !== "string" || !isLoopEngineeringHookCommand(command);
+    });
+    if (keptHooks.length > 0) {
+      keptGroups.push({ ...group, hooks: keptHooks });
+    }
+  }
+  return keptGroups;
+}
 
 /**
  * 仓库根的判据: 同时含 `core/manifest.json` 与 `packages/adapter-cc/dist/`。
@@ -52,8 +119,8 @@ function isRepoRoot(dir: string): boolean {
  * 用"从 import.meta.url 所在目录逐级向上行走"的稳健方式, 兼容两种执行形态:
  *   1. bun 直接跑 src: import.meta.url = packages/adapter-cc/src/install.ts,
  *      向上数级即命中仓库根。
- *   2. node 跑构建后的 packages/cli/dist/index.mjs (install.ts 被 tsup 打进 CLI bundle):
- *      import.meta.url = packages/cli/dist/index.mjs, 同样逐级向上能命中仓库根。
+ *   2. node 跑构建后的 packages/cli/dist/index.js (install.ts 被 tsup 打进 CLI bundle):
+ *      import.meta.url = packages/cli/dist/index.js, 同样逐级向上能命中仓库根。
  * 旧实现用 adapterRoot() 固定向上两级, 在形态 2 下会误算成 packages/cli, 导致
  * hookMjsSources() 去 packages/cli/dist 找 .mjs (不存在) → hooks 静默跳过未落盘。
  *
@@ -208,7 +275,7 @@ async function dryRun(ctx: InstallContext): Promise<AssetManifest> {
   const files = entries.map((e) => {
     let size = 0;
     if (e.rel === ".claude/settings.json") {
-      size = Buffer.byteLength(JSON.stringify(settingsTemplate), "utf-8");
+      size = Buffer.byteLength(JSON.stringify(renderSettings(ctx)), "utf-8");
     } else {
       try {
         size = fs.statSync(e.src).size;
@@ -244,9 +311,10 @@ function copyOne(
 function installSettings(
   dst: string,
   force: boolean,
+  ctx: InstallContext,
 ): "written" | "skipped" {
   fs.mkdirSync(path.dirname(dst), { recursive: true });
-  const incoming = settingsTemplate;
+  const incoming = renderSettings(ctx);
   if (!fs.existsSync(dst)) {
     fs.writeFileSync(
       dst,
@@ -305,6 +373,9 @@ function mergeHooks(
   const newHooks = JSON.parse(
     JSON.stringify(existingHooks),
   ) as Record<string, unknown>;
+  for (const [event, groups] of Object.entries(newHooks)) {
+    newHooks[event] = stripLoopEngineeringHooks(groups);
+  }
   for (const [event, groups] of Object.entries(incomingHooks)) {
     const existingGroups = newHooks[event];
     if (!Array.isArray(existingGroups)) {
@@ -343,7 +414,7 @@ async function install(ctx: InstallContext): Promise<InstallResult> {
   for (const e of entries) {
     const dst = path.join(projectDir, e.rel);
     if (e.rel === ".claude/settings.json") {
-      const r = installSettings(dst, ctx.force);
+      const r = installSettings(dst, ctx.force, ctx);
       (r === "written" ? writtenFiles : skippedFiles).push(e.rel);
       continue;
     }
@@ -361,7 +432,7 @@ async function install(ctx: InstallContext): Promise<InstallResult> {
     files: entries.map((e) => {
       let size = 0;
       if (e.rel === ".claude/settings.json") {
-        size = Buffer.byteLength(JSON.stringify(settingsTemplate), "utf-8");
+        size = Buffer.byteLength(JSON.stringify(renderSettings(ctx)), "utf-8");
       } else {
         try {
           size = fs.statSync(e.src).size;

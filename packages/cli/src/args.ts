@@ -54,6 +54,8 @@ export function parseCliArgs(tokens: string[]): Args {
     "project-dir": { type: "string" as const },
     force: { type: "boolean" as const },
     "dry-run": { type: "boolean" as const },
+    "hook-mode": { type: "string" as const },
+    "cli-command": { type: "string" as const },
     help: { type: "boolean" as const },
     h: { type: "boolean" as const },
     // --- dry-run 子命令 ---

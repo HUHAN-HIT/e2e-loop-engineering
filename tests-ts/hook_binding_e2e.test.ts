@@ -59,7 +59,7 @@ function resolveRepoRoot(): string {
 }
 
 const REPO_ROOT = resolveRepoRoot();
-const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.mjs");
+const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 
 // ---------------------------------------------------------------------------
 // 共享 sandbox: install 一次, 所有测试共用 .claude/hooks/loop_engineering/

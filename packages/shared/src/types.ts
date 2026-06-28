@@ -36,6 +36,10 @@ export interface InstallContext {
   projectDir: string;
   /** 是否覆盖已存在文件 */
   force: boolean;
+  /** hook 安装模式: local=复制入口, cli=写入 e2e-loop hook 命令, auto=installer 自行选择 */
+  hookMode?: "local" | "cli" | "auto";
+  /** CLI hook 模式使用的命令前缀, 例如 e2e-loop 或 node path/to/index.js */
+  cliCommand?: string;
   /** 用户级偏好 */
   features?: HookFeatures;
 }

@@ -90,7 +90,23 @@ export async function runInstall(args: Args): Promise<number> {
   const projectDir = resolveProjectDir(args.values["project-dir"]);
   const force = args.flags.has("force");
   const dryRun = args.flags.has("dry-run");
-  const ctx: InstallContext = { projectDir, force };
+  const hookModeValue = args.values["hook-mode"];
+  const hookMode = hookModeValue as InstallContext["hookMode"];
+  if (
+    hookModeValue &&
+    hookModeValue !== "local" &&
+    hookModeValue !== "cli" &&
+    hookModeValue !== "auto"
+  ) {
+    process.stderr.write(`错误: --hook-mode 只接受 local | cli | auto, 收到: ${hookModeValue}\n`);
+    return 1;
+  }
+  const ctx: InstallContext = {
+    projectDir,
+    force,
+    hookMode,
+    cliCommand: args.values["cli-command"],
+  };
 
   // host=both: 依次跑 CC → OC, 输出按宿主分段标注。
   // 顺序固定 CC 先 OC 后: 共享的 .claude/skills/ 由 CC 先写, OC 第二次跑时这些进 skipped

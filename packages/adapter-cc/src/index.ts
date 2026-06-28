@@ -23,3 +23,9 @@ export {
   coerceEvent,
   type CCPayload,
 } from "./runtime.js";
+export {
+  normalizeCliHookName,
+  runClaudeHook,
+  toDashHookName,
+  type CliHookName,
+} from "./hook_dispatcher.js";

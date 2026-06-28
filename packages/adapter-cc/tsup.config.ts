@@ -1,11 +1,8 @@
 /**
  * adapter-cc 构建配置。
  *
- * 4 个 hook binding 各编译成单文件 ESM .mjs, bundle 所有依赖 (含 @e2e-loop/shared)。
+ * 包入口 index + 4 个 hook binding 各编译成单文件 ESM .mjs, bundle 所有依赖 (含 @e2e-loop/shared)。
  * 用户机器只需 node 即可运行 (无需 Bun / 无需 node_modules)。
- *
- * install.ts / runtime.ts / index.ts 不需要单独产物 (由上层 CLI 通过 workspace import 直接用源码);
- * 本配置只产出 4 个 hook .mjs。
  */
 
 import { defineConfig } from "tsup";
@@ -16,6 +13,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   entry: {
+    index: path.join(here, "src/index.ts"),
     probe_and_gate: path.join(here, "src/hooks/probe_and_gate.ts"),
     guard_paths: path.join(here, "src/hooks/guard_paths.ts"),
     post_task_collect: path.join(here, "src/hooks/post_task_collect.ts"),

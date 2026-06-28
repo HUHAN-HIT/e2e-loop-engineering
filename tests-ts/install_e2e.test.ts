@@ -2,7 +2,7 @@
  * Claude Code adapter 端到端回归测试 (P1 go/no-go 门禁的一部分)。
  *
  * 目的: 守住一个 install.test.ts (workspace src 形态) 覆盖不到的真实 bug——
- * install.ts 被 tsup 打进 packages/cli/dist/index.mjs 后, 旧的 import.meta.url 固定
+ * install.ts 被 tsup 打进 packages/cli/dist/index.js 后, 旧的 import.meta.url 固定
  * 向上两级定位会把 adapterRoot 误算成 packages/cli, 于是 4 个 hook .mjs 去
  * packages/cli/dist 找 (不存在) → 静默跳过 → 目标项目里压根没有 .claude/hooks/。
  *
@@ -49,7 +49,7 @@ function resolveRepoRoot(): string {
 }
 
 const REPO_ROOT = resolveRepoRoot();
-const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.mjs");
+const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 
 beforeAll(() => {
   // 构建很快 (约几十 ms), 确保 cli/dist 与 adapter-cc/dist 都是最新产物。

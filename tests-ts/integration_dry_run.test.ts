@@ -4,7 +4,7 @@
  * 行为权威: Python `tests/test_integration_dry_run.py` (333 行, 6 个端到端测试)。
  * 被测实现:
  *   - packages/ssot-ts/src/runtime/coordinator.ts (状态机 + tick 循环 + 收口/签收/中止/amend)
- *   - packages/cli/dist/index.mjs (P5-M7B 算法 dry-run 子命令, 经 CLI 入口的端到端探针)
+ *   - packages/cli/dist/index.js (P5-M7B 算法 dry-run 子命令, 经 CLI 入口的端到端探针)
  *
  * 7 个测试:
  * 1. test_end_to_end_simple_run —— CREATED→PLANNING→IMPLEMENTING→WRAPPING_UP→COMPLETE
@@ -306,7 +306,7 @@ test("[py: test_trust_mode_refuses_unattended] switchTrustMode → TrustModeSwit
 });
 
 // ---------------------------------------------------------------------------
-// 7. CLI 入口端到端 (经构建后的 dist/index.mjs)
+// 7. CLI 入口端到端 (经构建后的 dist/index.js)
 // ---------------------------------------------------------------------------
 
 /** 从测试文件位置定位仓库根 (tests-ts/ 直属仓库根)。 */
@@ -327,7 +327,7 @@ function resolveRepoRoot(): string {
 }
 
 const REPO_ROOT = resolveRepoRoot();
-const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.mjs");
+const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 // 夹具自包含于 tests-ts/ (不依赖已归档的 Python tests/ 树)。
 const SMOKE = path.join(REPO_ROOT, "tests-ts", "fixtures", "smoke");
 
@@ -336,7 +336,7 @@ beforeAll(() => {
   execSync("npm run build", { cwd: REPO_ROOT, stdio: "pipe" });
 });
 
-test("[CLI 入口端到端] node 跑 dist/index.mjs: init→plan→signoff-plan→run, 产物落盘 + phase 迁移", () => {
+test("[CLI 入口端到端] node 跑 dist/index.js: init→plan→signoff-plan→run, 产物落盘 + phase 迁移", () => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "loop-cli-e2e-"));
   try {
     const reqPath = path.join(SMOKE, "req.md");

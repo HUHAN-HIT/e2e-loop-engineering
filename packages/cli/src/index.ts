@@ -4,14 +4,14 @@
  *
  * 子命令树:
  *   e2e-loop install    --host <cc|oc|both> --project-dir <path> [--force] [--dry-run]
- *   e2e-loop uninstall  --host <cc|oc>      --project-dir <path>
+ *   e2e-loop uninstall  --host <cc|oc|both> --project-dir <path>
  *   e2e-loop list                           --project-dir <path>
  *   e2e-loop help | --help | -h | (无参数)
  *
  * 设计要点:
  *   - 不引第三方 (用 Node 20+ 内置 util.parseArgs)
  *   - 错误 → stderr + exit 1; 成功 → 简洁 stdout
- *   - host=oc/both 在 P1 阶段显式失败 (协作范式红线)
+ *   - host=cc → Claude Code; host=oc → OpenCode; host=both → 两套都装 (P2-B 接通)
  *   - 跨平台 (path.join, 不拼 shell 字符串)
  */
 
@@ -20,11 +20,7 @@ import { printHelp } from "./commands/help.js";
 import { runInstall } from "./commands/install.js";
 import { runUninstall } from "./commands/uninstall.js";
 import { runList } from "./commands/list.js";
-import {
-  InvalidHostError,
-  OcNotImplementedError,
-  BothNotImplementedError,
-} from "./util.js";
+import { InvalidHostError } from "./util.js";
 
 async function main(): Promise<number> {
   const tokens = process.argv.slice(2);
@@ -81,11 +77,7 @@ main()
   })
   .catch((e) => {
     // 已知业务错误 → 友好 stderr + exit 1
-    if (
-      e instanceof InvalidHostError ||
-      e instanceof OcNotImplementedError ||
-      e instanceof BothNotImplementedError
-    ) {
+    if (e instanceof InvalidHostError) {
       process.stderr.write(`错误: ${e.message}\n`);
       process.exitCode = 1;
       return;

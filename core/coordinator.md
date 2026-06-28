@@ -1,6 +1,11 @@
 ---
 name: loop-engineering
 description: 协作式多阶段开发 harness (澄清 → 计划 → 实现 → 总结). 主 agent 作为协调器, 按设计文档的刻度循环驱动子 agent 完成 worker 任务. 当用户需要在 Claude Code 中以协作范式 (非对抗) 推进需求时使用.
+license: MIT
+compatibility: claude-code,opencode
+metadata:
+  version: 0.4.0-alpha
+  standards: glossary,clarification,plan,test-design,implementation,review
 ---
 
 # Loop Engineering (Claude Code 协作式 harness)

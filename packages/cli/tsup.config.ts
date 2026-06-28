@@ -8,9 +8,14 @@
  *     ./dist/index.mjs 或 npm install -g; 这里不再用 banner 注入, 否则会出现
  *     两行 shebang —— Node 只忽略首行, 第二行被当代码导致 SyntaxError。
  *
- * 注意: adapter-cc 的 4 个 hook .mjs 是 install 时从 packages/adapter-cc/dist/ 读取并
+ * 注意 1: adapter-cc 的 4 个 hook .mjs 是 install 时从 packages/adapter-cc/dist/ 读取并
  * 复制到目标项目的, 不打包进 CLI bundle; 所以构建 CLI 前应先构建 adapter-cc
  * (npm run build:adapter-cc)。
+ *
+ * 注意 2: adapter-oc (host=oc/both) 在 install 时用 js-yaml 渲染 OpenCode agent 的
+ * frontmatter (见 packages/adapter-oc/src/render.ts)。adapter-oc 本身无独立 dist, 其 src 被
+ * 本配置 noExternal 打进 CLI bundle; 因此 js-yaml 也必须一并 bundle, 否则
+ * `node cli/dist/index.mjs install --host oc` 独立运行会因找不到 js-yaml 而报错。
  */
 
 import { defineConfig } from "tsup";
@@ -26,8 +31,10 @@ export default defineConfig({
   outExtension: () => ({ js: ".mjs" }),
   target: "node20",
   platform: "node",
-  // 自包含: 把 @e2e-loop/shared 与 @e2e-loop/adapter-claude-code 的源码打进单文件
-  noExternal: [/@e2e-loop\//],
+  // 自包含: 把 @e2e-loop/* (shared / adapter-claude-code / adapter-opencode) 的源码打进单文件;
+  // 同时把 js-yaml 一并打进去 (adapter-oc 渲染 OC agent frontmatter 时依赖它,
+  // bundle 后独立运行需要它在场)。
+  noExternal: [/@e2e-loop\//, "js-yaml"],
   // node 内置模块保持外部 import
   external: [],
   splitting: false,

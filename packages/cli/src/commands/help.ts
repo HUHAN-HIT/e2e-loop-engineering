@@ -22,14 +22,14 @@ export function printHelp(stream: NodeJS.WriteStream = process.stdout): void {
 install 选项:
   --host <cc|oc|both>   必需。选择宿主 adapter
                           cc   → Claude Code (.claude/)
-                          oc   → OpenCode (P2 实现)
-                          both → 同时装两套 (P2 实现)
+                          oc   → OpenCode (.claude/skills/ + .opencode/)
+                          both → 同时装两套 (共享 .claude/skills/)
   --project-dir <path>  目标项目根目录 (缺省: 当前工作目录)
   --force               覆盖已存在的文件 (默认: 跳过冲突文件)
   --dry-run             只预览不写盘
 
 uninstall 选项:
-  --host <cc|oc>        必需。要卸载哪个 adapter 的产物
+  --host <cc|oc|both>   必需。要卸载哪个 adapter 的产物 (both = 两套都卸)
   --project-dir <path>  目标项目根目录 (缺省: 当前工作目录)
 
 list 选项:

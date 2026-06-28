@@ -11,6 +11,7 @@
   },
   "description": "OpenCode adapter: 从 core 渲染并落 .claude/skills/ 与 .opencode/ (agents frontmatter 转换 + opencode.json 合并)。",
   "scripts": {
+    "build": "tsup --config tsup.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.0",
+    "tsup": "^8.0.0",
     "typescript": "^5.4.0"
   }
 }

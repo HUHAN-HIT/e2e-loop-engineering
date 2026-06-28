@@ -8,8 +8,9 @@
   ],
   "scripts": {
     "build:adapter-cc": "tsup --config packages/adapter-cc/tsup.config.ts",
+    "build:adapter-oc-plugin": "tsup --config packages/adapter-oc/tsup.config.ts",
     "build:cli": "tsup --config packages/cli/tsup.config.ts",
-    "build": "npm run build:adapter-cc && npm run build:cli",
+    "build": "npm run build:adapter-cc && npm run build:adapter-oc-plugin && npm run build:cli",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

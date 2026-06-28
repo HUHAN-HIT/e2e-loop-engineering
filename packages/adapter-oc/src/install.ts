@@ -10,10 +10,14 @@
  *     standards/*.md          ← core/standards/*
  *   <projectDir>/.opencode/
  *     agents/<id>.md (×4)     ← core/subagents/* (需 frontmatter 转换: CC tools → OC permission)
+ *     plugins/loop-engineering.js ← packages/adapter-oc/dist/loop-engineering.js (4 hook 等价 plugin bundle;
+ *                                dist 未构建则跳过, 不让 install 失败)
  *     opencode.json           ← 合并安全写入 (permission.skill = "allow")
  *
  * 与 adapter-cc 的差异:
- * - 不装 hooks、不写 settings.json (OpenCode 不依赖 CC 的 .mjs hook 形态)。
+ * - hook 形态不同: CC 装 4 个 .mjs (stdin/stdout); OC 装 1 个 plugin .js (OC plugin API)。
+ *   逻辑层 (@e2e-loop/shared) 完全复用, 只 binding 层不同。
+ * - 不写 settings.json (OpenCode plugin 启动自动加载, 无需配置注册)。
  * - subagent 走 `.opencode/agents/` (复数; OpenCode 不读 `.claude/agents/`), 且 frontmatter 重写。
  * - 配置文件是 opencode.json (合并策略保证 permission.skill 存在)。
  *
@@ -88,6 +92,23 @@ function listSubagents(coreDir: string): string[] {
     .sort();
 }
 
+/**
+ * OpenCode plugin bundle 的源路径 (<repoRoot>/packages/adapter-oc/dist/loop-engineering.js)。
+ *
+ * 由 `npm run build:adapter-oc-plugin` (tsup) 产出。install 时复制到目标项目
+ * .opencode/plugins/loop-engineering.js。dist 未构建时此文件不存在, install 会按"源缺失即跳过"处理
+ * (镜像 adapter-cc 对未编译 hook .mjs 的容忍), 不让整个 install 失败。
+ */
+function pluginBundleSrc(): string {
+  return path.join(
+    repoRoot(),
+    "packages",
+    "adapter-oc",
+    "dist",
+    "loop-engineering.js",
+  );
+}
+
 /** 落盘条目的渲染方式。 */
 type RenderKind =
   /** 纯文件复制 (SKILL/README/standards) */
@@ -152,7 +173,16 @@ function collectManifestEntries(): FileEntry[] {
     });
   }
 
-  // 5. opencode.json (合并安全写入; 无源文件)
+  // 5. plugin bundle → .opencode/plugins/loop-engineering.js (4 hook 等价; 纯复制)
+  //    dist 未构建时 src 不存在, install 会"源缺失即跳过", manifest 仍列出此条 (size=0)。
+  entries.push({
+    rel: ".opencode/plugins/loop-engineering.js",
+    src: pluginBundleSrc(),
+    source: "adapter",
+    kind: "copy",
+  });
+
+  // 6. opencode.json (合并安全写入; 无源文件)
   entries.push({
     rel: ".opencode/opencode.json",
     src: "",
@@ -377,7 +407,13 @@ async function uninstall(projectDir: string): Promise<UninstallResult> {
     );
   }
 
-  // 3. .opencode/opencode.json (整文件; 由本工具管理)
+  // 3. .opencode/plugins/loop-engineering.js (本工具装的 plugin; 只删本文件, 不删目录里用户自建 plugin)
+  rmFileIfExists(
+    path.join(root, ".opencode/plugins/loop-engineering.js"),
+    ".opencode/plugins/loop-engineering.js",
+  );
+
+  // 4. .opencode/opencode.json (整文件; 由本工具管理)
   rmFileIfExists(
     path.join(root, ".opencode/opencode.json"),
     ".opencode/opencode.json",

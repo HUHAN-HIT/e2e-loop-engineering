@@ -32,9 +32,11 @@ export class InvalidHumanAnchorError extends Error {
   }
 }
 
-/** design §1: 每个 anchor 只在特定 phase 合法。 */
+/**
+ * design §1: 每个 anchor 只在特定 phase 合法。
+ * 方法论演进 (2026-06-28): 删除 clarification 锚点 (澄清不再单独停人)。
+ */
 const ANCHOR_ALLOWED_PHASES: Readonly<Record<HumanPendingType, ReadonlySet<Phase>>> = {
-  [HumanPending.clarification]: new Set<Phase>([Phase.CREATED, Phase.CLARIFYING]),
   [HumanPending.plan_signoff]: new Set<Phase>([Phase.PLANNING]),
   [HumanPending.wrap_up_signoff]: new Set<Phase>([Phase.WRAPPING_UP]),
 };

@@ -41,7 +41,7 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 3. 在每个 phase 边界跑对应自检清单(下方), 全是客观可判定项。不通过 → 退回同一 worker 修一次 → 仍不通过升级给人。绝不让两个 worker 互相否决、多轮返工。
 4. 调度用 ready_frontier: 候选不仅与 active 比冲突, 还要与本批已选候选两两比(写路径重叠 / exclusive)。无法静态判定写路径是否重叠时, 保守串行。worker 超时未交回 → 退回 pending 重派并作废本次派发(递增 attempt); 旧派发迟到交回则丢弃 —— 它可能已写文件, 与重派的双写靠收口 diff 兜底(详见设计 §3.3)。
 5. **能力探测时机**: run 启动 (CREATED) 时先一次性探测宿主 git/fs diff 能力, 写入 `run-state.capabilities`; 整个 run 的 actual_writes 采集路径据此固定, 不每个 task 临时探测 (避免一会儿自采一会儿自报)。worker 跑完后, **你 (coordinator) 从 git diff 采集**本次 actual_writes (不让 worker 自报, 使越界检测独立于 worker 诚实); 若 actual_writes 越出其 allowed_write_paths, 标记越界并触发收口 diff 复核。探测到无 git/fs diff 能力时才回退 worker 自报, 并在 `run-state.capabilities` (`git_diff: false`) 标注退化。
-6. 只在两个锚点把球交给人(set human_pending): 计划拍板("plan_signoff")、收口验收("wrap_up_signoff")。澄清期可选第三类("clarification")。除此之外不打扰人。
+6. 只在两个锚点把球交给人(set human_pending): 计划拍板("plan_signoff")、收口验收("wrap_up_signoff")。澄清不再是人盯点(方法论演进 2026-06-28: 删除 "clarification" 锚点, 带默认进 PLANNING, 问题在计划拍板呈现)。两锚点提问: 有 AskUserQuestion 工具则弹结构化框, 无则文本。除此之外不打扰人。
 7. 保持 compact summary: 只读 worker 的 summary 与 artifact 路径, 不加载长日志。
 
 # 注意力预算 (重要取向)
@@ -78,15 +78,27 @@ input/requirement.md(原始需求)。
 
 # 职责
 1. 通读需求, 列出阻塞性歧义。判据: 不澄清就无法定验收口径, 或会导致返工。
-2. 每个问题给一个**默认假设**, 让人可以直接采纳默认跳过回答。
-3. 删掉 nice-to-have: 凡是能用合理默认继续的, 不要问。问题数量越少越好。
+2. 每个问题给一个**默认假设**(coordinator 带默认继续, 不停下单独等回答; 问题在计划拍板呈现)。
+3. 删掉 nice-to-have: 凡是能用合理默认继续的, 不要列为问题。
+4. 判定无需澄清时, 把每个被默认处理的不确定点写进 skip_basis 留证(不能交空产物)。
 
 # 产出: clarification/questions.json
+// 有阻塞问题
 {
   "schema": "loop-engineering.clarification.v2",
   "questions": [
     { "id": "Q1", "question": "...", "why_blocking": "影响哪条 AC/拆分/测试/风险",
       "default_if_unanswered": "...(可直接采纳的默认)" }
+  ],
+  "skip_basis": [],
+  "can_proceed_with_defaults": true
+}
+// 判定无需澄清 → 空问题 + 非空 skip_basis 留证
+{
+  "schema": "loop-engineering.clarification.v2",
+  "questions": [],
+  "skip_basis": [
+    { "considered": "被评估的具体歧义点", "why_non_blocking": "为何非阻塞/可给的无损默认" }
   ],
   "can_proceed_with_defaults": true
 }
@@ -94,7 +106,8 @@ input/requirement.md(原始需求)。
 # 红线
 - 不为"问得全"而问; 不问偏好性、可后置的问题。
 - 不自己回答需求里的开放设计选择(那是计划阶段的事), 只标出"必须先定才能动"的点。
-- 若没有阻塞性歧义, 返回空 questions + can_proceed_with_defaults:true。
+- 不停下单独等回答 —— 有阻塞问题也带默认继续, 交计划拍板呈现。
+- 判定无需澄清时, 返回空 questions + **非空 skip_basis**(逐条留证); **绝不返回空 skip_basis 冒充"无需澄清"** —— 无证据的糊弄是本范式唯一致命失败。
 ```
 
 ---
@@ -183,7 +196,7 @@ input/requirement.md + (若有) clarification/*.json。
 ## 接线说明 (how to wire up)
 
 1. **启动**: coordinator 建 runs/<run_id>/, 写 run-state.json(phase=CREATED, trust_mode=collaborative)。
-2. **澄清**: 仅当需求有阻塞性歧义 → dispatch §B; 把 default 可采纳的问题连同默认呈给人, 人不答就走默认。
+2. **澄清**: medium/complex dispatch §B 评估 (simple 跳过); 不单独停人 —— 有阻塞问题带默认进 PLANNING、问题挂到计划拍板呈现, 裁量跳过则产非空 skip_basis 留证。
 3. **计划**: dispatch §C → 跑计划自检 → 把 design+task-plan 摘要呈给人 **plan_signoff**。人补充则回 §C; 通过则冻结计划进 IMPLEMENTING。
 4. **实施**: coordinator 每轮算 ready_frontier, 为每个 ready task dispatch 一个 §D(tools 白名单按其 allowed_write_paths 收窄)。回收 test-results/summary/key-diffs → 跑任务自检 → 过则解锁下游, 不过退回该 §D 一次。
 5. **(可选红队)**: risk:high task 收口前 dispatch §E; 人随时可手动触发。

@@ -27,6 +27,7 @@ import { pathGlobsOverlap } from "../scheduling/path_overlap.js";
 import { probeCapabilities } from "../scheduling/capabilities.js";
 import { isMeaningful } from "../schema/artifacts.js";
 import type { KeyDiffsFile, PlanAmendmentNeeded } from "../schema/artifacts.js";
+import { parseClarificationQuestions } from "../schema/clarification.js";
 import type {
   ClarificationAnswers,
   ClarificationQuestions,
@@ -143,29 +144,43 @@ export class Coordinator {
     }
   }
 
-  /** 存 questions.json, 有阻塞性问题时 set human_pending=clarification。 */
+  /**
+   * 存 questions.json (含 skip_basis)。
+   *
+   * 方法论演进 (2026-06-28): 澄清不再单独停人——无论有无阻塞问题, 都不 set 人盯点;
+   * 有阻塞问题时带 default_if_unanswered 继续, 问题在 plan 签署时一并呈现。
+   */
   submitClarification(q: ClarificationQuestions): void {
     const qPath = path.join(this.runDir, "clarification", "questions.json");
     fs.mkdirSync(path.dirname(qPath), { recursive: true });
     fs.writeFileSync(qPath, `${JSON.stringify(q, null, 2)}\n`, "utf-8");
-    if (q.questions.length > 0 && !q.can_proceed_with_defaults) {
-      this.state = setHumanPending(this.state, HumanPending.clarification);
-      this.refreshStateFile();
-    }
   }
 
-  /** 存 answers.json, clear clarification anchor → 进 PLANNING。 */
+  /**
+   * 存 answers.json → 进 PLANNING (CLARIFYING 时)。
+   *
+   * 方法论演进 (2026-06-28): 无 clarification 锚点可清; 仅记录默认采纳并推进。
+   */
   answerClarification(answers: ClarificationAnswers): void {
     const aPath = path.join(this.runDir, "clarification", "answers.json");
     fs.mkdirSync(path.dirname(aPath), { recursive: true });
     fs.writeFileSync(aPath, `${JSON.stringify(answers, null, 2)}\n`, "utf-8");
-    if (this.state.human_pending === HumanPending.clarification) {
-      this.state = clearHumanPending(this.state);
-    }
     if (this.state.phase === Phase.CLARIFYING) {
       this.state = advancePhase(this.state, Phase.PLANNING);
     }
     this.refreshStateFile();
+  }
+
+  /** 读取 clarification/questions.json (供 plan 自检的澄清证据兜底); 不存在返回 null。 */
+  private readClarificationQuestions(): ClarificationQuestions | null {
+    const p = path.join(this.runDir, "clarification", "questions.json");
+    if (!fs.existsSync(p)) return null;
+    try {
+      return parseClarificationQuestions(JSON.parse(fs.readFileSync(p, "utf-8")));
+    } catch {
+      // 解析失败按"无有效证据"处理 → plan_check 据此判 fail (而非静默放行)。
+      return null;
+    }
   }
 
   /** → PLANNING (从 CREATED 或 CLARIFYING 进)。 */
@@ -186,9 +201,14 @@ export class Coordinator {
       throw new Error(`submitPlan 必须在 PLANNING phase (当前 ${this.state.phase})`);
     }
     this.plan = plan;
-    // 跑计划自检. 多服务契约文件存在时纳入 gate。
+    // 跑计划自检. 多服务契约文件存在时纳入 gate; 澄清证据兜底 (medium/complex 跳过须留证)。
     const contracts = this.readServiceContracts();
-    const result = checkPlan(plan, { contracts, pathOverlapFn: pathGlobsOverlap });
+    const clarification = this.readClarificationQuestions();
+    const result = checkPlan(plan, {
+      contracts,
+      pathOverlapFn: pathGlobsOverlap,
+      clarification,
+    });
     if (!result.all_pass) {
       this.refreshPlanFile();
       const failPath = path.join(this.runDir, "planning", "plan-check-failures.json");

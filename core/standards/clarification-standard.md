@@ -10,20 +10,35 @@
 
 ## 0. 一句话定位
 
-澄清不是"把需求问全", 是"只问那些不先定就必然返工的点"。**问一个非阻塞问题的成本 = 占用人最稀缺的注意力预算 (SKILL §7)**, 所以默认倾向是**不问、用默认继续**, 只有跨过阻塞门槛才升级给人。
+澄清不是"把需求问全", 是"只标那些不先定就必然返工的点"。**澄清永不单独停人**(方法论演进 2026-06-28)——有阻塞问题也带默认继续, 问题在 plan 签署时一并呈现; 用人最稀缺的注意力预算 (SKILL §7) 时, 只在 plan/收口两点。默认倾向是**用默认继续**; 但"无需澄清"这个判断**必须落成可审计证据 (skip_basis)**, 不能是无痕的脑内决定。
 
 ---
 
-## 1. 该不该进澄清 (coordinator 先判, finder 复核)
+## 1. 产问题还是产 skip_basis (coordinator 先判, finder 复核)
 
-**进澄清的判据 (满足任一):** `[M][C]`
+澄清不再分"进/不进", 而是**评估后产出二选一**:
+
+**有阻塞性歧义 → 产 questions (满足任一即阻塞):** `[M][C]`
 1. 需求里有一个词/约束有 ≥2 种互斥解读, 且不同解读会改变 AC 真假口径。
 2. 缺一个关键输入 (目标用户 / 数据来源 / 边界条件), 缺了它无法定测试该断言什么。
 3. 需求与现状/既有契约可能冲突, 冲突解法会改变拆分。
+→ 每个问题配好 `default_if_unanswered`, **带默认继续**, 问题挂到 plan 签署呈现 (不停下单独等回答)。
 
-**不进澄清 (直接默认继续):** `[S][M][C]`
-- simple 档**一律跳过**澄清 (单一改动、无状态机、单服务)。
-- 所有不确定点都能给出"采纳默认、错了只局部返工"的合理假设。
+**无阻塞性歧义 → 产 skip_basis 留证:** `[M][C]`
+- 所有不确定点都能给出"采纳默认、错了只局部返工"的合理假设 → `questions: []`, 但 `skip_basis` 非空。
+- 空跳过 (既无问题又无 skip_basis) 会被 `post_task_collect` 拒、`plan_check.clarification_evidence` 兜底——**"看了没问题"必须写成证据, 不能只是状态跳转**。
+
+**simple 档:** 协调器整段跳过、不 dispatch finder。`complexity=simple` 即证据, 不产 skip_basis。
+
+### 1.1 skip_basis 单条质量栏 (缺一即退回重写) `[M][C]`
+
+| ✗ 坏 skip_basis 项 | 病征 | ✓ 好 skip_basis 项 |
+| --- | --- | --- |
+| `{considered:"整体", why_non_blocking:"没问题"}` | 空洞, 不可审计 | `{considered:"验证码是否接第三方", why_non_blocking:"默认后端自生成 SVG, 不接第三方, 错了仅局部返工"}` |
+| `{considered:"需求", why_non_blocking:"看过了"}` | 没指出具体歧义点 | `{considered:"验证码位数/字符集", why_non_blocking:"默认 5 位纯数字, 不改 AC 真假口径"}` |
+| 漏掉某个真阻塞点不写 | 假留证 | 逐条覆盖所有被默认处理的不确定点 |
+
+`considered` 必须是**具体歧义点**(对回 glossary §2 判据), `why_non_blocking` 必须给出**为何能给无损默认 / 命中哪条非阻塞反例**——两者皆非空字符串。
 
 ---
 
@@ -59,7 +74,7 @@
 
 ## 4. 产出契约
 
-`clarification/questions.json` (schema 以 `loop_engineering/schema/clarification.py` 为参考):
+`clarification/questions.json` (schema 以 `packages/ssot-ts/src/schema/clarification.ts` 为参考):
 
 ```json
 {
@@ -70,14 +85,22 @@
       "why_blocking": "影响 AC-002 的校验口径与 T01 生成逻辑的字符集",
       "default_if_unanswered": "默认 5 位纯数字" }
   ],
+  "skip_basis": [],
   "can_proceed_with_defaults": true
 }
 ```
 
-无阻塞歧义时返回:
+**无阻塞歧义时不再返回空产物——必须留证 (medium/complex):** `questions: []` 但 `skip_basis` 非空,每条记下"被评估的歧义点 + 为何非阻塞":
 ```json
-{ "schema": "loop-engineering.clarification.v2", "questions": [], "can_proceed_with_defaults": true }
+{ "schema": "loop-engineering.clarification.v2",
+  "questions": [],
+  "skip_basis": [
+    { "considered": "验证码位数/字符集", "why_non_blocking": "可给无损默认: 5 位纯数字, 错了仅局部返工" },
+    { "considered": "过期时间", "why_non_blocking": "默认 5 分钟, 随计划走" }
+  ],
+  "can_proceed_with_defaults": true }
 ```
+(simple 档由协调器整段跳过、不 dispatch finder——`complexity=simple` 本身即证据,不产 skip_basis。)
 
 ---
 
@@ -86,6 +109,8 @@
 - 不为"问得全"而问; 不问偏好性、可后置、假设性未来的问题 (反例见 `glossary.md` §2)。
 - 不替人做开放设计决策。
 - 不把一个问题拆成三个近义问句凑数。
+- **不停下单独等人回答**——有阻塞问题也带默认继续, 交 plan 签署一并呈现。
+- **不返回空产物冒充"无需澄清"**——medium/complex 判定无阻塞时必须产非空 `skip_basis`; 空洞应付("看了没问题")等同没留证, 会被 hook 拒。
 
 ---
 
@@ -99,4 +124,6 @@
 - 按钮放左还是右? → 不改 AC/拆分/测试/风险 → **非阻塞**, 不问。
 - 过期时间? → 能给无损默认 (5 分钟) → 不问, 写进默认随计划走。
 
-**产出:** 2 个问题 (达标 ≤2), 都配好默认, `can_proceed_with_defaults: true`。人若不答, coordinator 采纳两个默认直接进 PLANNING。
+**产出:** 2 个问题 (达标 ≤2), 都配好默认, `skip_basis: []`, `can_proceed_with_defaults: true`。coordinator **不停下等回答**: 带两个默认直接进 PLANNING, 把这两个问题 + 采用的默认在 plan 签署时一并呈给人 (人可在那时改)。
+
+**对照——若这两点都能给无损默认 (判定无阻塞):** 产 `questions: []` + 非空 `skip_basis`(两条: "是否接第三方"、"位数/字符集", 各写明默认与为何非阻塞), 同样直进 PLANNING。绝不返回空 skip_basis。

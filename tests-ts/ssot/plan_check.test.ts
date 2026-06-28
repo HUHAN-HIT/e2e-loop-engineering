@@ -12,6 +12,7 @@ import { test, expect, describe } from "bun:test";
 
 import { checkPlan } from "../../packages/ssot-ts/src/checklists/plan_check.js";
 import { pathGlobsOverlap } from "../../packages/ssot-ts/src/scheduling/path_overlap.js";
+import { parseClarificationQuestions } from "../../packages/ssot-ts/src/schema/clarification.js";
 import {
   ServiceContractsSchema,
 } from "../../packages/ssot-ts/src/schema/service_contracts.js";
@@ -227,6 +228,76 @@ test("[py: test_default_path_overlap_detects_conflict] 缺省 pathOverlapFn 检�
   const result = checkPlan(plan);
   const items = result.items.filter((i) => i.check === "parallel_paths_disjoint");
   expect(items.some((i) => !i.passed)).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// 澄清证据 (用户决策 2026-06-28): medium/complex 裁量跳过澄清须留证
+// ---------------------------------------------------------------------------
+
+describe("TestClarificationEvidence", () => {
+  const SKIP_BASIS = parseClarificationQuestions({
+    questions: [],
+    skip_basis: [
+      { considered: "验证码位数", why_non_blocking: "默认 5 位纯数字, 无损" },
+    ],
+  });
+  const WITH_QUESTIONS = parseClarificationQuestions({
+    questions: [
+      { id: "Q1", question: "接第三方?", why_blocking: "改拆分", default_if_unanswered: "后端自生成" },
+    ],
+  });
+  const EMPTY = parseClarificationQuestions({ questions: [] }); // 空问题 + 空 skip_basis
+
+  function evidenceItems(
+    plan: ReturnType<typeof mkPlan>,
+    clarification: ReturnType<typeof parseClarificationQuestions> | null,
+  ) {
+    const result = checkPlan(plan, { clarification });
+    return result.items.filter((i) => i.check === "clarification_evidence");
+  }
+
+  test("不传 clarification 入参 → 不产生该检查项 (纯结构单测不受影响)", () => {
+    const plan = mkPlan([mkTask("T01")], Complexity.medium);
+    const result = checkPlan(plan); // 无 clarification key
+    expect(result.items.some((i) => i.check === "clarification_evidence")).toBe(false);
+  });
+
+  test("simple 档豁免: 即便传 null 也不产生该检查项", () => {
+    const plan = mkPlan([mkTask("T01")], Complexity.simple);
+    expect(evidenceItems(plan, null).length).toBe(0);
+  });
+
+  test("medium + 缺 questions.json (null) → fail", () => {
+    const plan = mkPlan([mkTask("T01")], Complexity.medium);
+    const items = evidenceItems(plan, null);
+    expect(items.length).toBe(1);
+    expect(items[0]!.passed).toBe(false);
+    expect(items[0]!.detail).toContain("questions.json");
+  });
+
+  test("medium + 空问题且空 skip_basis → fail (无证跳过)", () => {
+    const plan = mkPlan([mkTask("T01")], Complexity.medium);
+    const items = evidenceItems(plan, EMPTY);
+    expect(items[0]!.passed).toBe(false);
+    expect(items[0]!.detail).toContain("skip_basis");
+  });
+
+  test("medium + 非空 skip_basis → pass (裁量跳过留证)", () => {
+    const plan = mkPlan([mkTask("T01")], Complexity.medium);
+    const items = evidenceItems(plan, SKIP_BASIS);
+    expect(items.length).toBe(1);
+    expect(items[0]!.passed).toBe(true);
+  });
+
+  test("medium + 有阻塞问题 → pass (真有问题不算跳过)", () => {
+    const plan = mkPlan([mkTask("T01")], Complexity.medium);
+    expect(evidenceItems(plan, WITH_QUESTIONS)[0]!.passed).toBe(true);
+  });
+
+  test("complex + 空 skip_basis → fail (与 medium 同规则)", () => {
+    const plan = mkPlan([mkTask("T01")], Complexity.complex);
+    expect(evidenceItems(plan, EMPTY)[0]!.passed).toBe(false);
+  });
 });
 
 test("[py: test_contract_service_task_without_explicit_contract_declaration_fails]", () => {

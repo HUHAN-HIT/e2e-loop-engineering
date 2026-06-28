@@ -4,7 +4,7 @@ description: 协作式多阶段开发 harness (澄清 → 计划 → 实现 → 
 license: MIT
 compatibility: claude-code,opencode
 metadata:
-  version: 0.4.0-alpha
+  version: 0.5.0-alpha
   standards: glossary,clarification,plan,test-design,implementation,review
 ---
 
@@ -18,7 +18,7 @@ worker 任务通过 **Task 工具** 分发给 4 个子 agent:
 
 | 子 agent 文件 | 阶段 | 何时分发 |
 | --- | --- | --- |
-| `.claude/agents/clarification-finder.md` | CLARIFYING | 仅当存在阻塞性歧义 (多数 run 跳过) |
+| `.claude/agents/clarification-finder.md` | CLARIFYING | medium/complex 评估澄清时 (simple 整段跳过); 产问题或 skip_basis, **不停人等回答** |
 | `.claude/agents/plan-agent.md` | PLANNING | 每个 run 一次, 产出全部计划契约 |
 | `.claude/agents/implementation-worker.md` | IMPLEMENTING | 每 task 一个, 隔离上下文, DAG ready frontier 推进 |
 | `.claude/agents/red-team-reviewer.md` | 按需 | 仅当人要求或某 task `risk: high` 在收口前 |
@@ -90,17 +90,26 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 
 **不要**用 complex 的全套去套 simple 需求——摩擦要与复杂度匹配。
 
-### 阶段 1 · 澄清(CLARIFYING,多数 run 跳过)
+### 阶段 1 · 澄清(CLARIFYING,多数 run 跳过,**永不单独停人**)
 
-仅当存在**阻塞性歧义**(不澄清就无法定验收口径,或必然返工)才进入。craft 判据见 `standards/clarification-standard.md` 与 `standards/glossary.md` §2。规则:
+澄清评估"是否存在**阻塞性歧义**"(不澄清就无法定验收口径,或必然返工)。craft 判据见 `standards/clarification-standard.md` 与 `standards/glossary.md` §2。规则:
 
 - 只问"答案会改变设计/拆分/测试/风险"的问题;删掉一切 nice-to-have。
-- 每个问题给一个**可直接采纳的默认假设**,让人能跳过回答。
-- 没有阻塞性歧义就跳过本阶段,采用默认继续。
+- 每个问题给一个**可直接采纳的默认假设**。
+- **澄清不再是一个人盯点**:无论有无阻塞问题,都**不**停下单独等人——有阻塞问题就带 `default_if_unanswered` 默认继续,把这些问题与采用的默认在**计划拍板**时一并呈给人(人可在那时改)。唯一会停下等人的点是 plan 签署与收口验收两处。
+
+**"无需澄清"的判断必须落成可审计证据(用户决策 2026-06-28):**
+- simple 档跳过是规则驱动——`complexity=simple` 本身即证据,**不需** skip_basis,直接进 PLANNING。
+- **medium/complex 的裁量跳过**(你判定"看了,没有阻塞歧义")**必须**产出 `clarification/questions.json`,其中 `questions: []` 但 `skip_basis` 非空——每条 = `{considered: 被评估的歧义点, why_non_blocking: 为何非阻塞/可给无损默认}`。空跳过(既无问题又无 skip_basis)会被防糊弄 hook 拒绝(`post_task_collect`),plan 自检(`plan_check` 的 `clarification_evidence`)在 plan 签署前再兜底一道。
 
 dispatch `.claude/agents/clarification-finder.md`, 产出 `clarification/questions.json`:
 ```json
+// 有阻塞问题: 带默认继续, 问题挂到 plan 签署呈现
 { "questions": [ { "id":"Q1", "question":"...", "why_blocking":"影响哪条AC/拆分/测试/风险", "default_if_unanswered":"..." } ],
+  "skip_basis": [], "can_proceed_with_defaults": true }
+// 裁量跳过 (medium/complex): 空问题 + 非空 skip_basis 留证
+{ "questions": [],
+  "skip_basis": [ { "considered":"验证码位数/字符集", "why_non_blocking":"可给无损默认: 5 位纯数字, 错了仅局部返工" } ],
   "can_proceed_with_defaults": true }
 ```
 
@@ -122,7 +131,7 @@ dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**
 - [ ] `depends_on` 不成环
 - [ ] (多服务)每个契约的 provider+consumer 都有对应 task、每个契约 ≥1 集成用例
 
-**→ 计划拍板(人盯点 1):** 把设计、拆分、测试设计的摘要呈给人,问:"是否补充或修改?" 人补充则回本阶段;通过则冻结计划进入实施。
+**→ 计划拍板(人盯点 1):** 把设计、拆分、测试设计的摘要呈给人——**若宿主提供 AskUserQuestion 工具,用它弹出结构化提问框**(选项至少含"接受冻结 / 要改",建议默认置顶);**没有该工具的宿主则退化为文本提问**。同时把阶段 1 被跳过或带默认处理的澄清点一并列出供人改。问:"是否补充或修改?" 人补充则回本阶段;通过则冻结计划进入实施。
 
 ### 阶段 3 · 实施(IMPLEMENTING)
 
@@ -167,7 +176,7 @@ dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**
 - [ ] scope 与计划一致(无计划外的大范围改动)
 - [ ] (多服务)所有契约的集成用例绿 (契约 diff 判定参考 `loop_engineering/multi_service/contracts_diff.py:diff_contracts`)
 
-**→ 收口验收(人盯点 2):** 把 key-diffs 清单呈给人,问:"全部测试通过,关键改动如下,是否接受?" 通过 → COMPLETE。
+**→ 收口验收(人盯点 2):** 把 key-diffs 清单呈给人——**有 AskUserQuestion 工具则弹结构化提问框**(选项"接受 → COMPLETE / 退回 IMPLEMENTING 返工"),**无则文本提问**。问:"全部测试通过,关键改动如下,是否接受?" 通过 → COMPLETE。
 
 ### 阶段 5 · COMPLETE
 
@@ -281,7 +290,7 @@ runs/<run_id>/
 
 ```
 需求:"给登录加图形验证码"
-→ 复杂度:medium(单服务,3 个 AC)。跳过澄清(无阻塞歧义)。
+→ 复杂度:medium(单服务,3 个 AC)。裁量跳过澄清(无阻塞歧义)→ 产 questions.json 留 skip_basis(评估过"验证码位数/是否接第三方",均可给无损默认),不停人。
 → 计划: dispatch plan-agent → design.md + task-plan.yaml:
     T01 验证码生成(无依赖) / T02 校验接口(无依赖) / T03 登录接入(依赖 T01,T02)
     每个 task 带 scenario+checks。计划自检过。

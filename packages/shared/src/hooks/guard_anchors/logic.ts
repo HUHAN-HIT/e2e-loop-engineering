@@ -28,9 +28,12 @@ import {
 import { findActiveRun } from "../../runs.js";
 import type { HumanPending } from "../../run_state.js";
 
-/** 合法人工锚点 (design §1 / §8.1)。 */
+/**
+ * 合法人工锚点 (design §1 / §8.1)。
+ * 方法论演进 (2026-06-28): 删除 clarification 锚点 (澄清不再单独停人);
+ * CREATED/CLARIFYING 仍按 phase 放行 (见下方 main), 与锚点无关。
+ */
 const LEGAL_ANCHORS: ReadonlySet<HumanPending> = new Set([
-  "clarification",
   "plan_signoff",
   "wrap_up_signoff",
 ]);

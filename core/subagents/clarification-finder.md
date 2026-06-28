@@ -32,24 +32,37 @@ tools: Read, Write
 
 ### 职责
 1. 通读需求, 列出阻塞性歧义。判据: 不澄清就无法定验收口径, 或会导致返工。
-2. 每个问题给一个**默认假设**, 让人可以直接采纳默认跳过回答。
-3. 删掉 nice-to-have: 凡是能用合理默认继续的, 不要问。问题数量越少越好。
+2. 每个问题给一个**默认假设**(coordinator 会带默认继续, 不停下单独等回答; 问题在 plan 签署时呈现)。
+3. 删掉 nice-to-have: 凡是能用合理默认继续的, 不要列为问题。
+4. **判定"无需澄清"时不能交空产物**——把每个被默认处理的不确定点写进 `skip_basis`(`considered` + `why_non_blocking`), 作为可审计留证。空 questions + 空 skip_basis 会被防糊弄 hook 拒。
 
 ### 产出: `clarification/questions.json`
 ```json
+// 有阻塞问题
 {
   "schema": "loop-engineering.clarification.v2",
   "questions": [
     { "id": "Q1", "question": "...", "why_blocking": "影响哪条 AC/拆分/测试/风险",
       "default_if_unanswered": "...(可直接采纳的默认)" }
   ],
+  "skip_basis": [],
+  "can_proceed_with_defaults": true
+}
+// 判定无需澄清 → 空问题 + 非空 skip_basis 留证
+{
+  "schema": "loop-engineering.clarification.v2",
+  "questions": [],
+  "skip_basis": [
+    { "considered": "被评估的具体歧义点", "why_non_blocking": "为何非阻塞/可给的无损默认 (可回指 glossary §2 判据)" }
+  ],
   "can_proceed_with_defaults": true
 }
 ```
-(产物的 schema 形式以 `loop_engineering/schema/clarification.py` 为参考; coordinator 按此 schema 解析.)
+(产物的 schema 形式以 `packages/ssot-ts/src/schema/clarification.ts` 为参考; coordinator 按此 schema 解析.)
 
 ## 红线
 
 - 不为"问得全"而问; 不问偏好性、可后置的问题。
 - 不自己回答需求里的开放设计选择(那是计划阶段的事), 只标出"必须先定才能动"的点。
-- 若没有阻塞性歧义, 返回空 questions + `can_proceed_with_defaults: true`。
+- 若没有阻塞性歧义, 返回空 questions + **非空 skip_basis**(每个被默认处理的点逐条留证), `can_proceed_with_defaults: true`。**绝不返回空 skip_basis 冒充"无需澄清"**——那是无证据的糊弄, 本范式唯一致命的失败。
+- 不在 skip_basis 里写空洞条目("看了没问题"); `considered` 要具体、`why_non_blocking` 要给出无损默认或非阻塞理由。

@@ -25,24 +25,14 @@ function make(phase: Phase): RunState {
   return parseRunState({ run_id: "r1", complexity: "simple", phase });
 }
 
-// ---------- clarification ----------
+// ---------- clarification 锚点已删除 (方法论演进 2026-06-28) ----------
 
-test("[py: test_set_clarification_only_in_created_or_clarifying] clarification 仅在 CREATED/CLARIFYING 合法", () => {
-  for (const ok of [Phase.CREATED, Phase.CLARIFYING]) {
-    const s = setHumanPending(make(ok), HumanPending.clarification);
-    expect(s.human_pending).toBe(HumanPending.clarification);
-  }
-  // 非法: IMPLEMENTING
-  let caught: unknown;
-  try {
-    setHumanPending(make(Phase.IMPLEMENTING), HumanPending.clarification);
-  } catch (e) {
-    caught = e;
-  }
-  expect(caught).toBeInstanceOf(InvalidHumanAnchorError);
-  const err = caught as InvalidHumanAnchorError;
-  expect(err.phase).toBe(Phase.IMPLEMENTING);
-  expect(err.anchor).toBe(HumanPending.clarification);
+test("HumanPending 不再含 clarification (澄清不再单独停人)", () => {
+  // 枚举只剩两个人盯点; clarification 作为锚点已不存在。
+  expect(Object.values(HumanPending).sort()).toEqual([
+    "plan_signoff",
+    "wrap_up_signoff",
+  ]);
 });
 
 // ---------- plan_signoff ----------
@@ -99,8 +89,8 @@ test("[py: test_is_awaiting_human_true_when_set] is_awaiting_human 随 set/clear
 });
 
 test("[py: test_awaiting_anchor_returns_current] awaiting_anchor 返回当前 anchor", () => {
-  const state = make(Phase.CREATED);
+  const state = make(Phase.PLANNING);
   expect(awaitingAnchor(state)).toBeNull();
-  const waiting = setHumanPending(state, HumanPending.clarification);
-  expect(awaitingAnchor(waiting)).toBe(HumanPending.clarification);
+  const waiting = setHumanPending(state, HumanPending.plan_signoff);
+  expect(awaitingAnchor(waiting)).toBe(HumanPending.plan_signoff);
 });

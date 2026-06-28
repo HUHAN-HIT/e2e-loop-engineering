@@ -17,6 +17,7 @@
  * - f"{x!r}" repr → pyRepr (字符串加单引号), 测试只断言关键子串。
  */
 import { pathGlobsOverlap as pathGlobsOverlapRef } from "../scheduling/path_overlap.js";
+import type { ClarificationQuestions } from "../schema/clarification.js";
 import type { ServiceContracts } from "../schema/service_contracts.js";
 import type { TaskPlan } from "../schema/task_plan.js";
 
@@ -73,9 +74,13 @@ export function checkPlan(
   options?: {
     contracts?: ServiceContracts | null;
     pathOverlapFn?: PathOverlapFn;
+    clarification?: ClarificationQuestions | null;
   },
 ): PlanCheckResult {
   const contracts = options?.contracts ?? null;
+  // clarification 未传 = 未知 (调用方未提供); 传 null = 明确无 questions.json。
+  const clarificationProvided = options !== undefined && "clarification" in options;
+  const clarification = options?.clarification ?? null;
   // 缺省回退真实 pathGlobsOverlap (动态导入避免与 scheduling 子包潜在循环)。
   const pathOverlapFn: PathOverlapFn =
     options?.pathOverlapFn ?? defaultPathOverlapFn;
@@ -86,6 +91,13 @@ export function checkPlan(
   items.push(...checkParallelPathsDisjoint(plan, pathOverlapFn));
   items.push(...checkDepsNoCycle(plan));
 
+  // 澄清证据 (用户决策 2026-06-28): medium/complex 跳过澄清须留证。
+  // 仅在调用方提供 clarification 入参时纳入 (兜底校验, 由 runtime submitPlan 注入);
+  // 纯结构性单测不传则不跑此项, 不破坏既有用例。
+  if (clarificationProvided) {
+    items.push(...checkClarificationEvidence(plan, clarification));
+  }
+
   if (contracts !== null) {
     items.push(...checkContractsHaveProviderConsumerTasks(plan, contracts));
     items.push(...checkContractsHaveIntegrationCases(contracts));
@@ -93,6 +105,47 @@ export function checkPlan(
   }
 
   return mkResult(items);
+}
+
+/**
+ * medium/complex 的裁量跳过澄清须有可审计证据 (用户决策 2026-06-28)。
+ *
+ * simple 档跳过是规则驱动 (complexity=simple 本身即证据), 不产生此检查项。
+ * medium/complex 时: clarification 产物缺失 (null), 或 questions 与 skip_basis 双空 → fail。
+ * 有 ≥1 问题 (真有阻塞) 或非空 skip_basis (裁量跳过留证) → pass。
+ *
+ * 注: 这是客观存在性/非空判定, 不评判 skip_basis 内容是否"充分" (§4 门禁不做语义裁决)。
+ */
+function checkClarificationEvidence(
+  plan: TaskPlan,
+  clarification: ClarificationQuestions | null,
+): PlanCheckItem[] {
+  if (plan.complexity === "simple") {
+    return [];
+  }
+  if (clarification === null) {
+    return [
+      mkItem(
+        "clarification_evidence",
+        false,
+        `complexity=${plan.complexity} 但缺 clarification/questions.json; ` +
+          "裁量跳过澄清须留证 (空问题 + 非空 skip_basis)",
+      ),
+    ];
+  }
+  const hasQuestions = clarification.questions.length > 0;
+  const hasSkipBasis = clarification.skip_basis.length > 0;
+  if (!hasQuestions && !hasSkipBasis) {
+    return [
+      mkItem(
+        "clarification_evidence",
+        false,
+        `complexity=${plan.complexity} 跳过澄清但 skip_basis 为空; ` +
+          "无需澄清的判断须落成可审计证据 (skip_basis)",
+      ),
+    ];
+  }
+  return [mkItem("clarification_evidence", true, "")];
 }
 
 /**

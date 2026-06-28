@@ -420,10 +420,11 @@ test("clarification-finder + questions.json 含 3 问题 → defer, question_cou
 });
 
 // ---------------------------------------------------------------------------
-// 用例 10: clarification-finder + questions.json 为空 → deny; reason 含 clarification
+// 用例 10: clarification-finder + 空 questions 且空 skip_basis → deny; reason 含 skip_basis
+// (用户决策 2026-06-28: "无需澄清" 不能无证落盘)
 // ---------------------------------------------------------------------------
 
-test("clarification-finder + questions.json 空 → deny, reason 含 clarification", async () => {
+test("clarification-finder + 空 questions 且空 skip_basis → deny, reason 含 skip_basis", async () => {
   const repoRoot = makeRepoRoot("clarempty");
   const runDir = makeRun(repoRoot, "20260101-001", {
     run_id: "20260101-001",
@@ -440,7 +441,39 @@ test("clarification-finder + questions.json 空 → deny, reason 含 clarificati
 
   const out = await handlePostTaskCollect(taskInput(repoRoot, "clarification-finder"));
   expect(out.decision).toBe("deny");
-  expect(out.reason ?? "").toContain("clarification");
+  expect(out.reason ?? "").toContain("skip_basis");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 10b: clarification-finder + 空 questions 但非空 skip_basis → defer (裁量跳过留证合法)
+// ---------------------------------------------------------------------------
+
+test("clarification-finder + 空 questions 但非空 skip_basis → defer, skip_basis_count=2", async () => {
+  const repoRoot = makeRepoRoot("clarskip");
+  const runDir = makeRun(repoRoot, "20260101-001", {
+    run_id: "20260101-001",
+    phase: "CLARIFYING",
+    complexity: "medium",
+    trust_mode: "collaborative",
+    active_tasks: [],
+  });
+  fs.writeFileSync(
+    path.join(runDir, "clarification", "questions.json"),
+    JSON.stringify({
+      questions: [],
+      skip_basis: [
+        { considered: "过期时间", why_non_blocking: "默认 5 分钟" },
+        { considered: "大小写", why_non_blocking: "默认不敏感" },
+      ],
+    }),
+    "utf-8",
+  );
+
+  const out = await handlePostTaskCollect(taskInput(repoRoot, "clarification-finder"));
+  expect(out.decision).toBe("defer");
+  expect(out.context!.verified).toBe(true);
+  expect(out.context!.skip_basis_count).toBe(2);
+  expect(out.context!.question_count).toBe(0);
 });
 
 // ---------------------------------------------------------------------------

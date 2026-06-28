@@ -65,17 +65,23 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 
 **不要**用 complex 的全套去套 simple 需求——摩擦要与复杂度匹配。
 
-### 阶段 1 · 澄清(CLARIFYING,多数 run 跳过)
+### 阶段 1 · 澄清(CLARIFYING,多数 run 跳过,**永不单独停人**)
 
-仅当存在**阻塞性歧义**(不澄清就无法定验收口径,或必然返工)才进入。规则:
+评估是否存在**阻塞性歧义**(不澄清就无法定验收口径,或必然返工)。规则:
 
-- 只问"答案会改变设计/拆分/测试/风险"的问题;删掉一切 nice-to-have。
-- 每个问题给一个**可直接采纳的默认假设**,让人能跳过回答。
-- 没有阻塞性歧义就跳过本阶段,采用默认继续。
+- 只标"答案会改变设计/拆分/测试/风险"的点;删掉一切 nice-to-have。
+- 每个问题给一个**可直接采纳的默认假设**。
+- **澄清不再是人盯点**:有阻塞问题也带 `default_if_unanswered` 默认进 PLANNING,把问题与采用的默认在**计划拍板**时一并呈给人(不停下单独等回答)。
+- **"无需澄清"必须留证**:simple 档跳过=规则驱动(`complexity=simple` 即证据,不产 skip_basis);medium/complex 裁量跳过须产 `questions: []` + 非空 `skip_basis`(每条 `{considered, why_non_blocking}`),空跳过会被防糊弄 hook 拒。
 
 产出 `clarification/questions.json`:
 ```json
+// 有阻塞问题: 带默认继续
 { "questions": [ { "id":"Q1", "question":"...", "why_blocking":"影响哪条AC/拆分/测试/风险", "default_if_unanswered":"..." } ],
+  "skip_basis": [], "can_proceed_with_defaults": true }
+// 裁量跳过(medium/complex): 空问题 + 非空 skip_basis 留证
+{ "questions": [],
+  "skip_basis": [ { "considered":"被评估的歧义点", "why_non_blocking":"为何非阻塞/可给的无损默认" } ],
   "can_proceed_with_defaults": true }
 ```
 
@@ -97,7 +103,7 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 - [ ] `depends_on` 不成环
 - [ ] (多服务)每个契约的 provider+consumer 都有对应 task、每个契约 ≥1 集成用例
 
-**→ 计划拍板(人盯点 1):** 把设计、拆分、测试设计的摘要呈给人,问:"是否补充或修改?" 人补充则回本阶段;通过则冻结计划进入实施。
+**→ 计划拍板(人盯点 1):** 把设计、拆分、测试设计的摘要呈给人——**有 AskUserQuestion 工具的宿主用它弹结构化提问框(选项含建议默认),无则文本提问**;一并列出阶段 1 被跳过/默认处理的澄清点供改。问:"是否补充或修改?" 人补充则回本阶段;通过则冻结计划进入实施。
 
 ### 阶段 3 · 实施(IMPLEMENTING)
 
@@ -142,7 +148,7 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 - [ ] scope 与计划一致(无计划外的大范围改动)
 - [ ] (多服务)所有契约的集成用例绿
 
-**→ 收口验收(人盯点 2):** 把 key-diffs 清单呈给人,问:"全部测试通过,关键改动如下,是否接受?" 通过 → COMPLETE。
+**→ 收口验收(人盯点 2):** 把 key-diffs 清单呈给人——**有 AskUserQuestion 工具则弹结构化提问框(接受 → COMPLETE / 退回 IMPLEMENTING 返工),无则文本**。问:"全部测试通过,关键改动如下,是否接受?" 通过 → COMPLETE。
 
 ### 阶段 5 · COMPLETE
 
@@ -180,7 +186,7 @@ run-state.phase = COMPLETE。给人一个最终摘要,指向所有产物。
 **run-state**(你唯一的写者):
 ```json
 { "run_id":"...", "phase":"IMPLEMENTING", "complexity":"complex", "trust_mode":"collaborative",
-  "human_pending": null,  // null | "clarification" | "plan_signoff" | "wrap_up_signoff"
+  "human_pending": null,  // null | "plan_signoff" | "wrap_up_signoff" (clarification 锚点已删, 澄清不停人)
   "active_tasks":["T02","T03"], "key_artifacts":["planning/design.md","planning/task-plan.yaml"],
   "capabilities": {"git_diff": true, "fs_snapshot": true},  // 可选, CREATED 时探测写入(见设计 §3.4/§6); 不预设 true
   "config": {"watchdog_timeout_min": {"simple":15,"medium":30,"complex":60}, "max_retries_per_task":1, "max_concurrency":4} }  // 可选, 运行参数单一落点; 缺省走默认
@@ -211,7 +217,7 @@ tasks:
 runs/<run_id>/
   run-state.json
   input/requirement.md
-  clarification/questions.json        # 可空
+  clarification/questions.json        # simple 跳过; medium/complex 须有 (问题 或 skip_basis 留证)
   planning/design.md, task-plan.yaml
   planning/service-contracts.yaml     # 仅多服务
   tasks/<id>/test-results.yaml, summary.md, key-diffs.yaml(纯 YAML), logs/

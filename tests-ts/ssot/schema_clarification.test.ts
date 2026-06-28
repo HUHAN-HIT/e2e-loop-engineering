@@ -10,6 +10,7 @@ import { test, expect } from "bun:test";
 import {
   QuestionSchema,
   ClarificationQuestionsSchema,
+  ClarificationSkipBasisItemSchema,
   ClarificationAnswersSchema,
   parseClarificationQuestions,
 } from "@e2e-loop/ssot";
@@ -89,6 +90,58 @@ test("[py: test_clarification_json_roundtrip] questions.json 往返一致 + sche
   expect("schema" in raw).toBe(true);
   expect(raw.schema).toBe("loop-engineering.clarification.v2");
   expect("schema_" in raw).toBe(false);
+});
+
+// ---------------------------------------------------------------------------
+// skip_basis: 裁量跳过澄清的可审计留证 (用户决策 2026-06-28)
+// ---------------------------------------------------------------------------
+
+test("skip_basis 默认空数组; 缺省的旧 questions.json 仍合法 (向后兼容)", () => {
+  const cq = parseClarificationQuestions({ questions: [] });
+  expect(cq.skip_basis).toEqual([]);
+  // schema 版本不变 (新增字段带默认, 不破坏旧产物)
+  expect(cq.schema).toBe("loop-engineering.clarification.v2");
+});
+
+test("合法 skip_basis 项 (considered + why_non_blocking 非空)", () => {
+  const item = ClarificationSkipBasisItemSchema.parse({
+    considered: "图形验证码是后端生成还是接第三方",
+    why_non_blocking: "可给无损默认: 后端自生成 SVG, 错了仅局部返工",
+  });
+  expect(item.considered).toContain("验证码");
+});
+
+test("skip_basis 项两字段不得为空 (含纯空白) — 杜绝空洞留证", () => {
+  // considered 空
+  expect(() =>
+    ClarificationSkipBasisItemSchema.parse({
+      considered: "   ",
+      why_non_blocking: "可给默认",
+    }),
+  ).toThrow();
+  // why_non_blocking 空
+  expect(() =>
+    ClarificationSkipBasisItemSchema.parse({
+      considered: "某歧义点",
+      why_non_blocking: "",
+    }),
+  ).toThrow();
+});
+
+test("空 questions + 非空 skip_basis 往返一致 (裁量跳过留证产物)", () => {
+  const cq = parseClarificationQuestions({
+    questions: [],
+    skip_basis: [
+      { considered: "过期时间", why_non_blocking: "默认 5 分钟, 无损" },
+      { considered: "大小写敏感", why_non_blocking: "默认不敏感比对" },
+    ],
+  });
+  const raw = JSON.parse(JSON.stringify(cq)) as Record<string, unknown>;
+  const cq2 = parseClarificationQuestions(raw);
+  expect(cq2.questions).toEqual([]);
+  expect(cq2.skip_basis.length).toBe(2);
+  expect(cq2.skip_basis[0].considered).toBe("过期时间");
+  expect("skip_basis" in raw).toBe(true);
 });
 
 test("[py: test_clarification_answers_default_empty] answers 默认空 dict", () => {

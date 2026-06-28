@@ -8,8 +8,8 @@
  *   3. implementation-worker: 独立重算 actual_writes (§0.2 防糊弄核心), 覆盖 worker 自报告。
  *   4. verified + actual_writes + warnings 通过 defer.context 注入主 agent 下一轮。
  *
- * block 条件 (artifact 缺失 / schema 不合法 / clarification 空):
- *   → decision=deny; reason 含 "artifact" 或 "clarification"
+ * block 条件 (artifact 缺失 / schema 不合法 / clarification 既无问题又无 skip_basis):
+ *   → decision=deny; reason 含 "artifact" 或 "skip_basis"
  *
  * warning 条件 (worker 自报告与 git diff 不一致 / 采集回退到 self_report):
  *   → 不 block, 在 context.warnings 里标红。
@@ -313,9 +313,21 @@ function handleClarification(runDir: string): HandleResult {
   const questions = Array.isArray(data)
     ? data
     : (data as { questions?: unknown[] })?.questions;
-  if (!Array.isArray(questions) || questions.length === 0) {
+  const skipBasis = Array.isArray(data)
+    ? undefined
+    : (data as { skip_basis?: unknown[] })?.skip_basis;
+  const questionCount = Array.isArray(questions) ? questions.length : 0;
+  const skipBasisCount = Array.isArray(skipBasis) ? skipBasis.length : 0;
+
+  // 防糊弄强制点 (用户决策 2026-06-28): "无需澄清" 不能无证落盘。
+  // 合法产出二选一: ① 有 ≥1 问题 (真有阻塞歧义); ② 空问题 + 非空 skip_basis (裁量跳过留证)。
+  // 两者皆空 = 既没找到问题又不给跳过依据 = 无证据的糊弄, deny。
+  if (questionCount === 0 && skipBasisCount === 0) {
     return {
-      output: deny("questions.json 为空; clarification-finder 必须产出 ≥1 问题"),
+      output: deny(
+        "questions.json 既无 questions 又无 skip_basis; clarification-finder 必须产出 " +
+          "≥1 问题, 或在判定无需澄清时给出非空 skip_basis (裁量跳过须留可审计证据)",
+      ),
     };
   }
 
@@ -324,7 +336,8 @@ function handleClarification(runDir: string): HandleResult {
       verified: true,
       worker: WORKER_CLARIFICATION,
       artifacts,
-      question_count: questions.length,
+      question_count: questionCount,
+      skip_basis_count: skipBasisCount,
       warnings: [],
     }),
   };
@@ -450,7 +463,8 @@ function readSideEffectContent(result: HandleResult, _runDir: string): unknown {
  *      context.verified=true (P1 占位 plan_check_all_pass=true)
  *   5. subagent_type="clarification-finder" + questions.json 含 3 问题 → defer;
  *      context.question_count=3
- *   6. subagent_type="clarification-finder" + questions.json 空 → deny; reason 含 "clarification"
+ *   6. subagent_type="clarification-finder" + 空 questions 且空 skip_basis → deny; reason 含 "skip_basis"
+ *   6b. subagent_type="clarification-finder" + 空 questions 但非空 skip_basis → defer (裁量跳过留证合法)
  *   7. subagent_type="other-worker" (非 loop) → allow (静默放行)
  *   8. 无活跃 run + loop worker 交回 → deny; reason 含 "init_run_dir"
  *   9. internal error → deny (fail-safe, 不静默放过)

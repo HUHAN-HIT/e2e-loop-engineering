@@ -289,8 +289,8 @@ def test_detect_oob_cross_task_shared_path() -> None:
         writes=["src/shared.py"],
         is_authoritative=True,
     )
-    # src/shared.py 已被 T0 写过.
-    earlier = {"src/shared.py": ["T0"]}
+    # src/shared.py 已被 T0 写过. dict 方向 = task_id → list of paths (与 tick.py 写入侧一致).
+    earlier = {"T0": ["src/shared.py"]}
     result = detect_out_of_bounds(
         task,
         collection,

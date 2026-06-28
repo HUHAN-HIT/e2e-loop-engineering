@@ -88,6 +88,7 @@ def tick(
     capabilities: RunCapabilities | None = None,
     before_snapshots: dict[str, dict[str, float]] | None = None,
     earlier_task_writes: dict[str, list[str]] | None = None,
+    base_refs: dict[str, str] | None = None,
     design_md: Path | None = None,
     task_plan_yaml: Path | None = None,
     run_dir: Path | None = None,
@@ -118,6 +119,7 @@ def tick(
     capabilities = capabilities or RunCapabilities()
     before_snapshots = before_snapshots or {}
     earlier_task_writes = earlier_task_writes or {}
+    base_refs = base_refs or {}
 
     new_active: list[str] = list(state.active_tasks)
     collected_amendments: list = []
@@ -154,6 +156,7 @@ def tick(
             packet,
             capabilities,
             before_snapshot=before_snapshots.get(task_id),
+            base_ref=base_refs.get(task_id),
             earlier_task_writes=earlier_task_writes,
         )
 
@@ -250,6 +253,12 @@ def tick(
             if capabilities.fs_snapshot:
                 from ..scheduling.actual_writes import take_fs_snapshot
                 before_snapshots[t.id] = take_fs_snapshot(packet.workdir)
+            # 取派发前 git base_ref (capabilities.git_diff=True 时, §3.4 base ref 采集)
+            if capabilities.git_diff:
+                from ..scheduling.actual_writes import take_git_base_ref
+                ref = take_git_base_ref(packet.workdir)
+                if ref is not None:
+                    base_refs[t.id] = ref
 
             outcome = runner.dispatch(packet)
             started_at_by_task[t.id] = now

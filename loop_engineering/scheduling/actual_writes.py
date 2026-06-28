@@ -103,7 +103,7 @@ def collect_via_git_diff(workdir: Path, base_ref: str) -> list[str] | None:
         for line in (diff_result.stdout or "").splitlines():
             line = line.strip()
             if line:
-                writes.add(line.replace("\", "/"))
+                writes.add(line.replace("\\", "/"))
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -122,7 +122,7 @@ def collect_via_git_diff(workdir: Path, base_ref: str) -> list[str] | None:
             # porcelain 格式: "XY path", XY 是两字符状态, 之后空格 + path.
             path = line[3:].strip().strip('"')
             if path:
-                writes.add(path.replace("\", "/"))
+                writes.add(path.replace("\\", "/"))
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -138,6 +138,31 @@ def _should_exclude_path(rel_path: str) -> bool:
         if seg in _FS_EXCLUDE_DIRS:
             return True
     return False
+
+
+def take_git_base_ref(workdir: Path) -> str | None:
+    """派出前取 git base ref (§3.4 base ref), 供 worker 交回后 git diff 用.
+
+    优先用 `git stash create` (创建一个无名 stash 对象, 不动工作树也不动 stash 栈),
+    失败则回退到 `git rev-parse HEAD`. 两者都失败返回 None (回退 fs / self_report).
+
+    `git stash create` 比 HEAD 更准: 它包含未提交的索引与工作树改动, 故 worker
+    派出期间的"先写再删"路径也能被 diff 抓到; HEAD 只抓 commit 之后的改动.
+    """
+    for cmd in (
+        ["git", "-C", str(workdir), "stash", "create"],
+        ["git", "-C", str(workdir), "rev-parse", "HEAD"],
+    ):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode != 0:
+            continue
+        ref = (r.stdout or "").strip()
+        if ref:
+            return ref
+    return None
 
 
 def take_fs_snapshot(workdir: Path) -> dict[str, float]:
@@ -265,7 +290,10 @@ def detect_out_of_bounds(
             oob.append(path)
             continue
         # 层 2: path 已被更早 task 写过 → 越界 (归最早写入者).
-        if earlier_task_writes and path in earlier_task_writes:
+        # earlier_task_writes 是 dict[task_id → list[path]], 故用 any 在 values 里查.
+        if earlier_task_writes and any(
+            path in writes for writes in earlier_task_writes.values()
+        ):
             oob.append(path)
 
     return OOBDetection(

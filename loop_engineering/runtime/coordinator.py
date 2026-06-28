@@ -71,10 +71,18 @@ class Coordinator:
         self.plan: TaskPlan | None = None
         self.started_at_by_task: dict[str, datetime] = {}
         self.stale_count_by_task: dict[str, int] = {}
-        # capabilities 探测: run_dir.parent 当 workdir (假设代码在 run_dir 之外).
-        self.capabilities: RunCapabilities = probe_capabilities(self.run_dir.parent)
+        # capabilities 探测 (§3.4 CREATED 时一次性写入 run-state, 此后固定):
+        # 反序列化已有 → 沿用; 缺失 → probe 后挂到 self.state, 由下一次 _refresh_state_file
+        # 顺带写回 (不在 __init__ 立即写, 避免 Windows 文件锁 race + 减少 IO).
+        if self.state.capabilities is None:
+            self.capabilities = probe_capabilities(self.run_dir.parent)
+            self.state.capabilities = self.capabilities
+        else:
+            self.capabilities = self.state.capabilities
         self.before_snapshots: dict[str, dict[str, float]] = {}
         self.earlier_task_writes: dict[str, list[str]] = {}
+        # §3.4 base_ref 采集: task_id → 派出前的 git base ref (capabilities.git_diff=True 时填)
+        self.base_refs: dict[str, str] = {}
         # 收口阶段缓存的每 task 任务自检结果 + key-diffs
         self._task_check_results: dict = {}
         self._key_diffs_by_task: dict[str, KeyDiffsFile | None] = {}
@@ -293,6 +301,7 @@ class Coordinator:
             capabilities=self.capabilities,
             before_snapshots=self.before_snapshots,
             earlier_task_writes=self.earlier_task_writes,
+            base_refs=self.base_refs,
             design_md=design_md,
             task_plan_yaml=task_plan_yaml,
             run_dir=self.run_dir,

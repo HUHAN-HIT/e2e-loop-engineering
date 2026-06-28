@@ -1,62 +1,62 @@
-# Failure Reason And Navigation Map Implementation Plan
+# 失败原因与导航图实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **致 agentic worker：** 必备子技能：用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现本计划。各步骤用复选框（`- [ ]`）语法跟踪进度。
 
-**Goal:** Keep the workspace manifests valid (the build is currently green), prevent malformed package manifests from reaching integration tests, and add a read-only navigation map to `e2e-loop status`.
+**目标：** 保持 workspace 各 manifest 合法（当前构建已绿），防止损坏的 package manifest 流入集成测试，并给 `e2e-loop status` 加一个只读导航图。
 
-**Architecture:** Keep `run-state.json` and `task-plan.yaml` as the only state sources. Add a pure runtime projection module that reads existing state and evidence files, then have the CLI render that projection without changing scheduling, gates, or task state.
+**架构：** 维持 `run-state.json` 与 `task-plan.yaml` 作为唯一状态源。新增一个纯 runtime 投影模块，读取既有状态与证据文件；再由 CLI 渲染该投影，**不改动**调度、门禁或 task 状态。
 
-**Tech Stack:** TypeScript, Bun test, Node.js `fs/path`, existing `@e2e-loop/ssot` runtime exports, existing `e2e-loop` CLI.
-
----
-
-## Scope And Priority
-
-This plan intentionally separates the immediate failure from operator UX:
-
-- P0: Verify `packages/ssot-ts/package.json` is valid JSON (repair only if corrupted), preserving the `./worktree` subpath export. As of 2026-06-28 the manifest is already valid and `npm run build` exits 0, so this is a verify-and-guard step, not a repair.
-- P0.5: Add a manifest guard so invalid workspace package JSON fails near the start of the test suite.
-- P1: Add a read-only navigation map projection to `status`.
-
-The navigation map must not introduce a second state source. It is a display/projection layer over existing files only.
-
-## File Structure
-
-- Modify: `packages/ssot-ts/package.json`
-  - Responsibility: valid workspace package metadata.
-- Modify: `tests-ts/publish_contract.test.ts`
-  - Responsibility: publish/package manifest contract checks.
-- Create: `packages/ssot-ts/src/runtime/navigation_map.ts`
-  - Responsibility: pure projection from `RunState`, optional `TaskPlan`, and evidence files to a compact operator map.
-- Modify: `packages/ssot-ts/src/runtime/index.ts`
-  - Responsibility: export the new runtime projection API.
-- Modify: `packages/cli/src/commands/dryrun.ts`
-  - Responsibility: render the navigation map from `status`.
-- Create: `tests-ts/ssot/navigation_map.test.ts`
-  - Responsibility: focused unit tests for the projection.
-- Modify: `tests-ts/integration_dry_run.test.ts`
-  - Responsibility: CLI-level assertion that `status` exposes the map.
+**技术栈：** TypeScript、Bun test、Node.js `fs/path`、既有 `@e2e-loop/ssot` runtime 导出、既有 `e2e-loop` CLI。
 
 ---
 
-### Task 1: Repair The Invalid Workspace Manifest
+## 范围与优先级
 
-**Files:**
-- Modify: `packages/ssot-ts/package.json`
+本计划有意把"眼前的故障"与"操作者 UX"分开：
 
-- [ ] **Step 1: Inspect the manifest**
+- P0：确认 `packages/ssot-ts/package.json` 是合法 JSON（仅在损坏时才修复），并保留 `./worktree` 子路径导出。截至 2026-06-28，该 manifest 已合法且 `npm run build` 退出码为 0，故这是一个"校验并加固"步骤，而非修复。
+- P0.5：加一个 manifest guard，让非法的 workspace package JSON 在测试套件早期就失败。
+- P1：给 `status` 加一个只读导航图投影。
 
-Run:
+导航图**绝不能**引入第二个状态源。它只是覆盖在既有文件之上的展示/投影层。
+
+## 文件结构
+
+- 修改：`packages/ssot-ts/package.json`
+  - 职责：合法的 workspace package 元数据。
+- 修改：`tests-ts/publish_contract.test.ts`
+  - 职责：publish / package manifest 契约校验。
+- 新建：`packages/ssot-ts/src/runtime/navigation_map.ts`
+  - 职责：从 `RunState`、可选 `TaskPlan` 与证据文件，纯投影出一份紧凑的操作者导航图。
+- 修改：`packages/ssot-ts/src/runtime/index.ts`
+  - 职责：导出新的 runtime 投影 API。
+- 修改：`packages/cli/src/commands/dryrun.ts`
+  - 职责：在 `status` 中渲染导航图。
+- 新建：`tests-ts/ssot/navigation_map.test.ts`
+  - 职责：投影模块的聚焦单测。
+- 修改：`tests-ts/integration_dry_run.test.ts`
+  - 职责：CLI 层断言 `status` 暴露出导航图。
+
+---
+
+### 任务 1：修复非法的 workspace manifest
+
+**文件：**
+- 修改：`packages/ssot-ts/package.json`
+
+- [ ] **步骤 1：检查 manifest**
+
+运行：
 
 ```powershell
 Get-Content packages\ssot-ts\package.json
 ```
 
-Expected (current tree): the file is already valid JSON and includes a `"./worktree": "./src/worktree/index.ts"` export. Proceed to Step 2 to repair **only if** the `description` field shows mojibake/control-character corruption or the JSON does not close. Otherwise treat Steps 2-4 as a no-op confirmation and move to Task 2.
+预期（当前工作树）：文件已是合法 JSON，且包含 `"./worktree": "./src/worktree/index.ts"` 导出。**仅当** `description` 字段出现乱码/控制字符损坏、或 JSON 未闭合时，才进入步骤 2 修复。否则把步骤 2-4 当作"空操作确认"，直接进入任务 2。
 
-- [ ] **Step 2: (Only if Step 1 found corruption) Restore valid JSON**
+- [ ] **步骤 2：（仅当步骤 1 发现损坏时）恢复为合法 JSON**
 
-CRITICAL: keep the `"./worktree": "./src/worktree/index.ts"` export — dropping it breaks every `@e2e-loop/ssot/worktree` consumer (e.g. `packages/cli/src/commands/dryrun.ts`) and the worktree tests. If you must rewrite the file, it should read exactly (this matches the current valid tree):
+关键：务必保留 `"./worktree": "./src/worktree/index.ts"` 导出——删掉它会打断每一个 `@e2e-loop/ssot/worktree` 消费方（例如 `packages/cli/src/commands/dryrun.ts`）以及 worktree 测试。若必须重写整文件，应与当前合法工作树完全一致：
 
 ```json
 {
@@ -91,37 +91,37 @@ CRITICAL: keep the `"./worktree": "./src/worktree/index.ts"` export — dropping
 }
 ```
 
-- [ ] **Step 3: Verify npm can parse the workspace**
+- [ ] **步骤 3：验证 npm 能解析 workspace**
 
-Run:
+运行：
 
 ```powershell
 npm run build
 ```
 
-Expected: `npm run build` exits 0 (the manifest parses; on the current tree this already holds). Any later TypeScript/build error is a separate issue and should be evaluated from its own message.
+预期：`npm run build` 退出码为 0（manifest 可解析；当前工作树已满足）。之后若出现 TypeScript/构建错误，那是另一个独立问题，应按其自身报错信息单独评估。
 
-- [ ] **Step 4: Commit this repair separately (skip if Step 1 found no corruption)**
+- [ ] **步骤 4：单独提交本次修复（若步骤 1 未发现损坏则跳过）**
 
-If Step 2 changed the file, run:
+若步骤 2 改动了文件，运行：
 
 ```powershell
 git add packages\ssot-ts\package.json
 git commit -m "fix: repair ssot package manifest"
 ```
 
-Expected: commit succeeds with only `packages/ssot-ts/package.json` staged. If the manifest was already valid, there is nothing to stage — skip this commit.
+预期：提交成功，且仅暂存了 `packages/ssot-ts/package.json`。若 manifest 本就合法，则无可暂存内容——跳过本次提交。
 
 ---
 
-### Task 2: Add A Workspace Manifest Guard
+### 任务 2：加一个 workspace manifest guard
 
-**Files:**
-- Modify: `tests-ts/publish_contract.test.ts`
+**文件：**
+- 修改：`tests-ts/publish_contract.test.ts`
 
-- [ ] **Step 1: Write a failing manifest validity test**
+- [ ] **步骤 1：写一个会失败的 manifest 合法性测试**
 
-Append this test to `tests-ts/publish_contract.test.ts`:
+把下面这个测试追加到 `tests-ts/publish_contract.test.ts`：
 
 ```ts
 import * as fs from "node:fs";
@@ -159,51 +159,51 @@ test("all workspace package manifests are valid JSON", () => {
 });
 ```
 
-If the file already imports `fs` helpers after implementation, merge imports rather than duplicating names.
+若该文件在实现后已 import 了 `fs` 相关 helper，请合并 import，不要重复声明同名绑定。
 
-- [ ] **Step 2: Run the focused test**
+- [ ] **步骤 2：跑这个聚焦测试**
 
-Run:
+运行：
 
 ```powershell
 bun test tests-ts\publish_contract.test.ts
 ```
 
-Expected: PASS. If Task 1 was not applied, this test should fail with a message naming `packages/ssot-ts/package.json`.
+预期：PASS。若任务 1 未应用，本测试应失败，且报错信息会点名 `packages/ssot-ts/package.json`。
 
-- [ ] **Step 3: Run the build smoke**
+- [ ] **步骤 3：跑构建冒烟**
 
-Run:
+运行：
 
 ```powershell
 npm run build
 ```
 
-Expected: build reaches package scripts instead of stopping at JSON parsing.
+预期：构建能进到 package scripts，而不是卡在 JSON 解析。
 
-- [ ] **Step 4: Commit the guard**
+- [ ] **步骤 4：提交 guard**
 
-Run:
+运行：
 
 ```powershell
 git add tests-ts\publish_contract.test.ts
 git commit -m "test: validate workspace package manifests"
 ```
 
-Expected: commit contains only the manifest guard.
+预期：提交只包含本 manifest guard。
 
 ---
 
-### Task 3: Add The Read-Only Navigation Projection
+### 任务 3：新增只读导航投影
 
-**Files:**
-- Create: `packages/ssot-ts/src/runtime/navigation_map.ts`
-- Modify: `packages/ssot-ts/src/runtime/index.ts`
-- Create: `tests-ts/ssot/navigation_map.test.ts`
+**文件：**
+- 新建：`packages/ssot-ts/src/runtime/navigation_map.ts`
+- 修改：`packages/ssot-ts/src/runtime/index.ts`
+- 新建：`tests-ts/ssot/navigation_map.test.ts`
 
-- [ ] **Step 1: Write focused projection tests**
+- [ ] **步骤 1：写聚焦的投影测试**
 
-Create `tests-ts/ssot/navigation_map.test.ts`:
+新建 `tests-ts/ssot/navigation_map.test.ts`：
 
 ```ts
 import { test, expect } from "bun:test";
@@ -370,19 +370,19 @@ test("navigation map flags a watchdog-blocked task", () => {
 });
 ```
 
-- [ ] **Step 2: Run the new test and confirm it fails**
+- [ ] **步骤 2：跑新测试并确认它失败**
 
-Run:
+运行：
 
 ```powershell
 bun test tests-ts\ssot\navigation_map.test.ts
 ```
 
-Expected: FAIL because `buildNavigationMap` is not exported.
+预期：FAIL，因为 `buildNavigationMap` 尚未导出。
 
-- [ ] **Step 3: Create the projection module**
+- [ ] **步骤 3：创建投影模块**
 
-Create `packages/ssot-ts/src/runtime/navigation_map.ts`:
+新建 `packages/ssot-ts/src/runtime/navigation_map.ts`：
 
 ```ts
 import * as fs from "node:fs";
@@ -642,46 +642,46 @@ function evidenceCandidatesForPhase(phase: Phase): string[] {
 }
 ```
 
-- [ ] **Step 4: Export the projection API**
+- [ ] **步骤 4：导出投影 API**
 
-Append this export to `packages/ssot-ts/src/runtime/index.ts`:
+把这行导出追加到 `packages/ssot-ts/src/runtime/index.ts`：
 
 ```ts
 export * from "./navigation_map.js";
 ```
 
-- [ ] **Step 5: Run focused tests**
+- [ ] **步骤 5：跑聚焦测试**
 
-Run:
+运行：
 
 ```powershell
 bun test tests-ts\ssot\navigation_map.test.ts
 ```
 
-Expected: PASS.
+预期：PASS。
 
-- [ ] **Step 6: Commit the projection**
+- [ ] **步骤 6：提交投影模块**
 
-Run:
+运行：
 
 ```powershell
 git add packages\ssot-ts\src\runtime\navigation_map.ts packages\ssot-ts\src\runtime\index.ts tests-ts\ssot\navigation_map.test.ts
 git commit -m "feat: add runtime navigation map projection"
 ```
 
-Expected: commit contains only the projection and focused unit tests.
+预期：提交只包含投影模块与其聚焦单测。
 
 ---
 
-### Task 4: Render Navigation Map In `status`
+### 任务 4：在 `status` 中渲染导航图
 
-**Files:**
-- Modify: `packages/cli/src/commands/dryrun.ts`
-- Modify: `tests-ts/integration_dry_run.test.ts`
+**文件：**
+- 修改：`packages/cli/src/commands/dryrun.ts`
+- 修改：`tests-ts/integration_dry_run.test.ts`
 
-- [ ] **Step 1: Add the CLI import**
+- [ ] **步骤 1：补 CLI import**
 
-In `packages/cli/src/commands/dryrun.ts`, extend the runtime import:
+在 `packages/cli/src/commands/dryrun.ts` 中扩展 runtime import：
 
 ```ts
 import {
@@ -697,9 +697,9 @@ import {
 } from "@e2e-loop/ssot/runtime";
 ```
 
-- [ ] **Step 2: Add a compact renderer**
+- [ ] **步骤 2：加一个紧凑渲染器**
 
-Add this helper near `humanPendingText`:
+在 `humanPendingText` 附近加这个 helper：
 
 ```ts
 function renderNavigationMap(
@@ -725,9 +725,9 @@ function renderNavigationMap(
 }
 ```
 
-- [ ] **Step 3: Wire it into `runStatus`**
+- [ ] **步骤 3：接进 `runStatus`**
 
-Replace the end of `runStatus` after the existing abort fields with:
+把 `runStatus` 末尾（既有 abort 字段之后）替换为：
 
 ```ts
   let plan = null;
@@ -743,11 +743,11 @@ Replace the end of `runStatus` after the existing abort fields with:
   return 0;
 ```
 
-Keep the existing `run_id`, `phase`, `complexity`, `trust_mode`, `human_pending`, `active_tasks`, and `aborted_reason` lines intact.
+保持既有的 `run_id`、`phase`、`complexity`、`trust_mode`、`human_pending`、`active_tasks`、`aborted_reason` 各行原样不动。
 
-- [ ] **Step 4: Add CLI integration assertions**
+- [ ] **步骤 4：加 CLI 集成断言**
 
-In `tests-ts/integration_dry_run.test.ts`, extend the final `status` assertions:
+在 `tests-ts/integration_dry_run.test.ts` 中扩展末尾的 `status` 断言：
 
 ```ts
     const statusOut = run("status", runId);
@@ -757,94 +757,94 @@ In `tests-ts/integration_dry_run.test.ts`, extend the final `status` assertions:
     expect(statusOut).toContain("next_action:");
 ```
 
-- [ ] **Step 5: Run the focused integration test**
+- [ ] **步骤 5：跑这个聚焦集成测试**
 
-Run:
+运行：
 
 ```powershell
 bun test tests-ts\integration_dry_run.test.ts
 ```
 
-Expected: PASS.
+预期：PASS。
 
-- [ ] **Step 6: Commit the status rendering**
+- [ ] **步骤 6：提交 status 渲染**
 
-Run:
+运行：
 
 ```powershell
 git add packages\cli\src\commands\dryrun.ts tests-ts\integration_dry_run.test.ts
 git commit -m "feat: show navigation map in status"
 ```
 
-Expected: commit contains only CLI rendering and CLI integration assertions.
+预期：提交只包含 CLI 渲染与 CLI 集成断言。
 
 ---
 
-### Task 5: Full Verification And Residual Checks
+### 任务 5：完整验证与残留检查
 
-**Files:**
-- No new files.
-- Validate all files changed by Tasks 1 through 4.
+**文件：**
+- 无新增文件。
+- 校验任务 1 到 4 改动过的所有文件。
 
-- [ ] **Step 1: Run focused checks first**
+- [ ] **步骤 1：先跑聚焦检查**
 
-Run:
+运行：
 
 ```powershell
 bun test tests-ts\publish_contract.test.ts tests-ts\ssot\navigation_map.test.ts tests-ts\integration_dry_run.test.ts
 ```
 
-Expected: PASS.
+预期：PASS。
 
-- [ ] **Step 2: Run build**
+- [ ] **步骤 2：跑构建**
 
-Run:
+运行：
 
 ```powershell
 npm run build
 ```
 
-Expected: PASS.
+预期：PASS。
 
-- [ ] **Step 3: Run full test suite**
+- [ ] **步骤 3：跑全量测试套件**
 
-Run:
+运行：
 
 ```powershell
 npm test
 ```
 
-Expected: PASS. If unrelated failures appear, capture the failing file names and exact first failure message before changing code.
+预期：PASS。若出现无关失败，先记录失败文件名与确切的首条失败信息，再动代码。
 
-- [ ] **Step 4: Inspect git diff for scope**
+- [ ] **步骤 4：检查 git diff 的范围**
 
-Run:
+运行：
 
 ```powershell
 git diff --stat
 git diff -- packages\ssot-ts\package.json tests-ts\publish_contract.test.ts packages\ssot-ts\src\runtime\navigation_map.ts packages\ssot-ts\src\runtime\index.ts packages\cli\src\commands\dryrun.ts tests-ts\ssot\navigation_map.test.ts tests-ts\integration_dry_run.test.ts
 ```
 
-Expected: only the planned files changed.
+预期：只有计划内的文件被改动。
 
-- [ ] **Step 5: Final commit if Tasks 1 to 4 were not committed separately**
+- [ ] **步骤 5：若任务 1 到 4 未分别提交，则做最终提交**
 
-Run:
+运行：
 
 ```powershell
 git add packages\ssot-ts\package.json tests-ts\publish_contract.test.ts packages\ssot-ts\src\runtime\navigation_map.ts packages\ssot-ts\src\runtime\index.ts packages\cli\src\commands\dryrun.ts tests-ts\ssot\navigation_map.test.ts tests-ts\integration_dry_run.test.ts
 git commit -m "feat: add status navigation map"
 ```
 
-Expected: commit succeeds after build and tests pass.
+预期：构建与测试通过后提交成功。
 
 ---
 
-## Self-Review
+## 自检 (Self-Review)
 
-- Spec coverage: The manifest task is now a verify-and-guard step (the tree is already valid JSON with `npm run build` green and the `./worktree` export intact), Task 2 adds a regression guard for package manifests, and the navigation map is a P1 read-only projection.
-- State ownership: The navigation map reads existing state and evidence files only; it does not write lifecycle state or alter scheduler behavior.
-- Human anchors vs failures: `human_pending` (plan_signoff / wrap_up_signoff) is a normal stop point, surfaced via `NavigationMap.human_pending` and `next_action`, and is NOT a `blocker`. The current phase stays `current` while waiting for a human. `blocker` is reserved for real failures: `aborted`, `plan_check_failed`, `task_failed`, `wrap_up_failed`.
-- Failure specificity: The map covers BOTH real failure paths in IMPLEMENTING — a task left `running` with `collect-failures.json` (the dispatch/collect path the main agent actually uses) and a `blocked` task (tick watchdog path) — via `firstFailedTask`. `plan_check_failed` is gated on `human_pending` being empty so a stale `plan-check-failures.json` does not misreport a plan that already passed and is awaiting signoff. Existing `collect-failures.json`, `plan-check-failures.json`, `wrap-up/check-result.json`, and `aborted_reason` remain the source of truth; the map points to them rather than duplicating content.
-- Type consistency: `buildNavigationMap(runDir, state, plan)` is exported from `@e2e-loop/ssot/runtime` and rendered by CLI `status`.
-- Test path: The plan runs focused Bun tests, `npm run build`, and the full `npm test` suite. Task 5 must confirm no other test asserts the full `status` output verbatim — only `toContain` is safe after the new lines (current `integration_dry_run.test.ts` and `integration_dispatch_collect.test.ts` use `toContain`).
+- 规格覆盖：manifest 任务现在是"校验并加固"步骤（工作树已是合法 JSON、`npm run build` 为绿、`./worktree` 导出完好）；任务 2 为 package manifest 增加回归 guard；导航图为 P1 只读投影。
+- 状态归属：导航图只读取既有状态与证据文件；不写生命周期状态，也不改调度器行为。
+- 人盯锚点 vs 失败：`human_pending`（plan_signoff / wrap_up_signoff）是正常停顿点，经 `NavigationMap.human_pending` 与 `next_action` 呈现，**不是** `blocker`。等人期间当前 phase 保持 `current`。`blocker` 只保留真失败：`aborted`、`plan_check_failed`、`task_failed`、`wrap_up_failed`。
+- 失败定位精度：导航图覆盖 IMPLEMENTING 下的**两条**真实失败路径——task 留 `running` 且写了 `collect-failures.json`（主 agent 实际走的 dispatch/collect 路径）与 `blocked` task（tick watchdog 路径）——均经 `firstFailedTask`。`plan_check_failed` 以 `human_pending` 为空为前提，避免已通过、正等签字的计划被一份残留的 `plan-check-failures.json` 误报。既有的 `collect-failures.json`、`plan-check-failures.json`、`wrap-up/check-result.json` 与 `aborted_reason` 仍是事实源；导航图指向它们，而非复制其内容。
+- 类型一致性：`buildNavigationMap(runDir, state, plan)` 从 `@e2e-loop/ssot/runtime` 导出，并由 CLI `status` 渲染。
+- 测试路径：本计划跑聚焦 Bun 测试、`npm run build` 与全量 `npm test`。任务 5 必须确认没有别的测试对 `status` 全量输出做精确断言——新增行之后只有 `toContain` 是安全的（当前 `integration_dry_run.test.ts` 与 `integration_dispatch_collect.test.ts` 都用的 `toContain`）。

@@ -64,6 +64,20 @@ e2e-loop install --host both --project-dir <path>
 
 ---
 
+### Worktree 选择
+
+`e2e-loop init` 本身保持非交互: CLI 不弹 prompt, 只执行明确参数。真实 coordinator 在收到用户需求后、调用 init 之前, 应先询问是否为本次 run 使用隔离 git worktree, 再把选择显式传给 CLI:
+
+| 用户选择 | CLI 参数 |
+| --- | --- |
+| 开启隔离 worktree (推荐) | `--worktree-mode auto` |
+| 使用当前目录 | `--worktree-mode none` |
+| 强制新建 worktree | `--worktree-mode always` |
+
+宿主有 AskUserQuestions/AskUserQuestion 工具时用结构化提问框; 无该工具时用文本提问。若当前仓库有未提交改动, coordinator 应把 `--worktree-mode auto` 作为推荐选项置顶, 避免本次开发与用户当前修改混在一起。
+
+---
+
 ## 架构
 
 ```

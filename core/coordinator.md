@@ -80,6 +80,13 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 
 ### 阶段 0 · 接收需求与复杂度判定
 
+**启动前 worktree 选择(在人给出需求后、创建 run 之前):** 在调用 `e2e-loop init` 前, 先让用户决定本次 run 是否使用隔离 git worktree。若宿主提供 AskUserQuestions/AskUserQuestion 工具, 用结构化提问框; 无则退化为文本提问。CLI 必须保持非交互, 不在 `e2e-loop init` 内部 prompt。把用户选择显式传给 init:
+- 推荐默认: "开启隔离 worktree" → `e2e-loop init <req.md> --worktree-mode auto`
+- "使用当前目录" → `e2e-loop init <req.md> --worktree-mode none`
+- "强制新建 worktree" → `e2e-loop init <req.md> --worktree-mode always`
+
+提示文案应说明: worktree 能避免本次开发与用户当前未提交改动混在一起; 选择当前目录则沿用旧行为。若已知当前仓库有未提交改动, 把 "开启隔离 worktree" 作为推荐选项置顶。
+
 读需求,一句话判定复杂度(写进 run-state 与 task-plan 顶部):
 
 | 档位 | 澄清 | 任务数 | 计划详尽度 | 判据 |

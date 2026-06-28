@@ -328,7 +328,8 @@ function resolveRepoRoot(): string {
 
 const REPO_ROOT = resolveRepoRoot();
 const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.mjs");
-const SMOKE = path.join(REPO_ROOT, "tests", "fixtures", "smoke");
+// 夹具自包含于 tests-ts/ (不依赖已归档的 Python tests/ 树)。
+const SMOKE = path.join(REPO_ROOT, "tests-ts", "fixtures", "smoke");
 
 beforeAll(() => {
   // 确保 cli/dist 是最新产物 (含 P5-M7B dry-run 子命令 + zod bundle)。

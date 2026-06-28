@@ -31,9 +31,10 @@ pytest
 pytest tests/test_checks_eval.py
 pytest tests/test_integration_dry_run.py::test_end_to_end_simple_run
 
-# [DEPRECATED 共存期] 旧 Python CLI 仍可用 (loop-eng install-claude / init / status / plan / run);
-# Python 包已 deprecated, P4/P5 后算法权威是 TS SSOT (packages/ssot-ts), 新流程走下方 npm CLI。
-loop-eng install-claude --project-dir <target-project> --force
+# [已归档] Python 包 (loop_engineering/ + tests/ + pyproject.toml) 已迁移到 TS 并归档到
+# archive/python-ssot/ (本地保留, 已 gitignore, 不进远程; 用户决策 2026-06-28)。
+# 算法权威现为 TS SSOT (packages/ssot-ts); 所有流程走下方 npm CLI。
+# 如需跑 Python 回归: cd archive/python-ssot && python -m pytest -q
 ```
 
 ```powershell
@@ -56,7 +57,7 @@ node packages/cli/dist/index.mjs run <run_id>
 node packages/cli/dist/index.mjs status <run_id>
 ```
 
-无独立 lint/format 命令; pyproject.toml 仅配置了 pytest (`testpaths=["tests"]`, `addopts="-ra -q"`)。TS 侧无 lint, 用 `tsc --noEmit` 把关。
+无独立 lint/format 命令 (Python pyproject.toml 的 pytest 配置已随包归档到 archive/python-ssot/)。TS 侧无 lint, 用 `tsc --noEmit` 把关。
 
 ## 架构 (跨多文件才能拼出的全景)
 

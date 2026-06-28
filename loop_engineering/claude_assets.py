@@ -1,9 +1,13 @@
 """Install Claude Code-facing loop-engineering assets into a project.
 
-The Python package is the executable SSOT and the only source for bundled
-skills, agents, hooks, and settings. Claude Code discovers those assets from a
-target project's .claude directory, so this module installs package assets into
-that target without ever reading from the implementation repo's .claude tree.
+P0 约定: skill/agent/standards 等 Claude 资产位于仓库根的 core/ 目录
+(由 T1+T2 从 loop_engineering/skills、loop_engineering/agents 迁入)。
+editable install 模式下, 仓库根即 Path(__file__).resolve().parent.parent,
+core/ 永远在该位置可读。正式 sdist/wheel 发布由后续 P 阶段处理。
+
+settings.json 与 hooks 仍在 loop_engineering/ Python 包内, 由包数据机制携带。
+Claude Code 从目标项目的 .claude/ 发现资产, 本模块把资产落到目标项目,
+绝不从实现仓库自身的 .claude 读取。
 """
 from __future__ import annotations
 
@@ -125,21 +129,43 @@ def install_claude_assets(project_dir: str | Path, *, force: bool = False) -> Cl
     """
     project = Path(project_dir).resolve()
     package_root = Path(__file__).resolve().parent
+    # P0: Claude 资产 (coordinator/subagents/standards/README) 位于仓库根 core/
+    repo_root = package_root.parent
+    core_dir = repo_root / "core"
     result = ClaudeAssetInstallResult(project_dir=project)
     claude_dir = project / ".claude"
 
+    # settings.json + hooks 仍在 Python 包内
     _install_settings(package_root / "settings.json", claude_dir / "settings.json", force=force, result=result)
-    _copy_tree_files(
-        package_root / "skills" / "loop-engineering",
-        claude_dir / "skills" / "loop-engineering",
-        force=force,
-        result=result,
-    )
-    _copy_tree_files(package_root / "agents", claude_dir / "agents", force=force, result=result)
     _copy_tree_files(
         package_root / "hooks" / "loop_engineering",
         claude_dir / "hooks" / "loop_engineering",
         force=force,
         result=result,
     )
+
+    # core/coordinator.md → .claude/skills/loop-engineering/SKILL.md (单文件重命名映射)
+    _copy_file(
+        core_dir / "coordinator.md",
+        claude_dir / "skills" / "loop-engineering" / "SKILL.md",
+        force=force,
+        result=result,
+    )
+    # core/README.md → .claude/skills/loop-engineering/README.md
+    if (core_dir / "README.md").is_file():
+        _copy_file(
+            core_dir / "README.md",
+            claude_dir / "skills" / "loop-engineering" / "README.md",
+            force=force,
+            result=result,
+        )
+    # core/standards/ → .claude/skills/loop-engineering/standards/
+    _copy_tree_files(
+        core_dir / "standards",
+        claude_dir / "skills" / "loop-engineering" / "standards",
+        force=force,
+        result=result,
+    )
+    # core/subagents/ → .claude/agents/
+    _copy_tree_files(core_dir / "subagents", claude_dir / "agents", force=force, result=result)
     return result

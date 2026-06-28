@@ -1,0 +1,8 @@
+{
+  "name": "@e2e-loop/adapter-claude-code",
+  "version": "0.2.0-alpha",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "description": "Claude Code adapter 包；P1 阶段从 core 渲染 SKILL/agents/hooks 并落 .claude/。"
+}

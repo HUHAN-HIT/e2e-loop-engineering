@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0-alpha",
+  "skill": {
+    "source": "core/coordinator.md",
+    "skillName": "loop-engineering"
+  },
+  "subagents": [
+    { "id": "clarification-finder", "source": "core/subagents/clarification-finder.md" },
+    { "id": "plan-agent", "source": "core/subagents/plan-agent.md" },
+    { "id": "implementation-worker", "source": "core/subagents/implementation-worker.md" },
+    { "id": "red-team-reviewer", "source": "core/subagents/red-team-reviewer.md" }
+  ],
+  "standards": "core/standards/*.md"
+}

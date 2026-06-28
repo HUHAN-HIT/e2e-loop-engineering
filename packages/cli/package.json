@@ -1,0 +1,8 @@
+{
+  "name": "@e2e-loop/cli",
+  "version": "0.2.0-alpha",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "description": "e2e-loop CLI 入口包；P1 阶段实现 install/uninstall 命令。"
+}

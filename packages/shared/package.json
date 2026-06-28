@@ -1,0 +1,8 @@
+{
+  "name": "@e2e-loop/shared",
+  "version": "0.2.0-alpha",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "description": "跨 adapter 共享层（HostAdapter/Hook 接口、actual_writes 采集、path 匹配）；P1 起填充。"
+}

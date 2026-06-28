@@ -25,8 +25,6 @@ include = ["loop_engineering*"]
 [tool.setuptools.package-data]
 loop_engineering = [
     "settings.json",
-    "agents/*.md",
-    "skills/loop-engineering/**/*.md",
     "hooks/loop_engineering/*.py",
 ]
 

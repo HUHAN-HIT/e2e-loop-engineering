@@ -1,0 +1,8 @@
+{
+  "name": "@e2e-loop/adapter-opencode",
+  "version": "0.2.0-alpha",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "description": "OpenCode adapter 包；P2/P3 阶段从 core 渲染并落 .claude/skills/ 或 .opencode/。"
+}

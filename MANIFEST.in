@@ -1,0 +1,4 @@
+# P0: 把仓库根 core/ (Claude 资产) 打进 sdist; editable install 时 claude_assets.py
+# 直接用 Path(__file__).resolve().parent.parent / "core" 读源仓库的 core/。
+# 正式 wheel 发布到 PyPI 由后续 P 阶段处理。
+recursive-include core *.md *.json

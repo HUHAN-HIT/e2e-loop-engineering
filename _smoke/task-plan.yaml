@@ -1,0 +1,14 @@
+schema: loop-engineering.task-plan.v2
+complexity: simple
+tasks:
+  - id: T01
+    title: 实现 hello() 函数
+    allowed_write_paths: ["src/**", "tests/**"]
+    depends_on: []
+    acceptance_refs: [AC-001]
+    exclusive: false
+    risk: normal
+    tests:
+      - id: T01-CASE-001
+        scenario: 调用 hello() 返回 "hi"
+        checks: ["passed == true"]

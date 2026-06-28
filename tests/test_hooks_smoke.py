@@ -18,17 +18,16 @@ from pathlib import Path
 
 import pytest
 
-HOOK_DIR = Path(__file__).resolve().parent.parent
-REPO_ROOT = HOOK_DIR.parents[2]  # .claude/hooks/loop_engineering/tests -> repo root
+REPO_ROOT = Path(__file__).resolve().parent.parent  # tests/test_hooks_smoke.py -> repo root
+HOOK_DIR = REPO_ROOT / "loop_engineering" / "hooks" / "loop_engineering"
 
 
 def _run_hook(script: str, payload: dict | None, env_overrides: dict | None = None) -> tuple[int, str, str]:
     """跑一个 hook 脚本, 喂 stdin JSON, 返回 (rc, stdout, stderr)."""
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = str(REPO_ROOT)
-    # 把 SSOT 加 PYTHONPATH 防万一 common 没找到 (Windows 路径)
-    ssot = str(REPO_ROOT / "outputs" / "loop_engineering")
-    env["PYTHONPATH"] = ssot + os.pathsep + env.get("PYTHONPATH", "")
+    # 加 PYTHONPATH 防万一 common.py 没注入 sys.path (Windows 路径)
+    env["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     if env_overrides:
         env.update(env_overrides)
     stdin_data = json.dumps(payload) if payload is not None else ""
@@ -152,6 +151,21 @@ class TestGuardPaths:
         rc, out, err = _run_hook("guard_paths.py", payload)
         result = _parse(out)
         assert result == {} or result.get("decision") != "block", f"应放行, 实际={result}, stderr={err}"
+
+    def test_no_active_run_passes_for_source(self, tmp_path, monkeypatch):
+        """无活跃 run (runs/ 空) → 即便写源码也放行, 不干扰 loop 之外的正常编辑 (#1)."""
+        empty = tmp_path / "runs_empty"
+        empty.mkdir()
+        monkeypatch.setenv("LOOP_RUNS_ROOT", str(empty))
+        payload = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(REPO_ROOT / "src" / "foo.py"), "content": "x"},
+        }
+        rc, out, err = _run_hook("guard_paths.py", payload)
+        result = _parse(out)
+        assert result == {} or result.get("decision") != "block", (
+            f"无活跃 run 应放行, 实际={result}, stderr={err}"
+        )
 
 
 # ===========================================================================

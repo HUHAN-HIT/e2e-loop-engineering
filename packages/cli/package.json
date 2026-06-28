@@ -1,8 +1,25 @@
 {
   "name": "@e2e-loop/cli",
-  "version": "0.2.0-alpha",
+  "version": "0.3.0-alpha",
   "private": true,
   "type": "module",
+  "bin": {
+    "e2e-loop": "./dist/index.mjs"
+  },
   "main": "./src/index.ts",
-  "description": "e2e-loop CLI 入口包；P1 阶段实现 install/uninstall 命令。"
+  "types": "./src/index.ts",
+  "description": "e2e-loop CLI 入口包；P1 阶段实现 install/uninstall/list 命令。",
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@e2e-loop/shared": "*",
+    "@e2e-loop/adapter-claude-code": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
 }

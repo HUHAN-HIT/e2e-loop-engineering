@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@e2e-loop/shared": ["packages/shared/src/index.ts"],
+      "@e2e-loop/adapter-claude-code": ["packages/adapter-cc/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

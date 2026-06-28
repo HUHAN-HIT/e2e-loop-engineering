@@ -1,8 +1,25 @@
 {
   "name": "@e2e-loop/adapter-claude-code",
-  "version": "0.2.0-alpha",
+  "version": "0.3.0-alpha",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
-  "description": "Claude Code adapter 包；P1 阶段从 core 渲染 SKILL/agents/hooks 并落 .claude/。"
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "description": "Claude Code adapter: 4 个 hook 的 CC binding + install (.mjs 自包含单文件)。",
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@e2e-loop/shared": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
 }

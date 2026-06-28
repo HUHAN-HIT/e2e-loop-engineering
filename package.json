@@ -1,6 +1,24 @@
 {
   "name": "e2e-loop",
-  "version": "0.2.0-alpha",
+  "version": "0.3.0-alpha",
   "private": true,
-  "workspaces": ["packages/*"]
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:adapter-cc": "tsup --config packages/adapter-cc/tsup.config.ts",
+    "build:cli": "tsup --config packages/cli/tsup.config.ts",
+    "build": "npm run build:adapter-cc && npm run build:cli",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.31.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.11.0",
+    "js-yaml": "^4.1.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
 }

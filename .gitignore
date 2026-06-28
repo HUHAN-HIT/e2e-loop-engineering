@@ -27,3 +27,9 @@ tests/fixtures/smoke/runs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Node / TS
+node_modules/
+dist/
+.bun/
+*.tsbuildinfo

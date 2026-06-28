@@ -38,6 +38,12 @@ import {
   makeWorkerOutcome,
 } from "@e2e-loop/ssot/dispatch";
 import type { WorkerOutcome, WorkerPacket } from "@e2e-loop/ssot/dispatch";
+import {
+  allocateRunWorktree,
+  worktreeBindingPath,
+  writeWorktreeBinding,
+  type WorktreeMode,
+} from "@e2e-loop/ssot/worktree";
 import { Complexity, Phase, parseRunState } from "@e2e-loop/ssot/schema";
 import type { TaskPlan, PlanAmendmentNeeded } from "@e2e-loop/ssot/schema";
 
@@ -91,6 +97,14 @@ function parseIntArg(raw: string | undefined, fallback: number): number {
   return Number.isNaN(n) ? fallback : n;
 }
 
+function parseWorktreeMode(raw: string | undefined): WorktreeMode | null {
+  const mode = raw ?? "none";
+  if (mode === "none" || mode === "auto" || mode === "always" || mode === "adopt") {
+    return mode;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
@@ -108,10 +122,16 @@ export function runInit(args: Args): number {
   }
   const reqPath = path.resolve(reqFile);
   if (!fs.existsSync(reqPath)) {
-    process.stderr.write(`错误: 需求文件不存在: ${reqPath}\n`);
+    process.stderr.write("错误: 需求文件不存在: " + reqPath + "\n");
     return 2;
   }
   const requirementText = fs.readFileSync(reqPath, "utf-8");
+
+  const worktreeMode = parseWorktreeMode(args.values["worktree-mode"]);
+  if (worktreeMode === null) {
+    process.stderr.write("错误: --worktree-mode 必须是 none|auto|always|adopt\n");
+    return 2;
+  }
 
   // --complexity auto → simple (与 Python 一致: auto 暂等价 simple)。
   const rawComplexity = args.values.complexity ?? "auto";
@@ -120,18 +140,40 @@ export function runInit(args: Args): number {
       ? Complexity.simple
       : (rawComplexity as TaskPlan["complexity"]);
 
-  const runsRoot = resolveRunsRoot(args);
-  const runId = nextRunId(runsRoot);
+  const sequenceRunsRoot = resolveRunsRoot(args);
+  const runId = nextRunId(sequenceRunsRoot);
+  const allocation = allocateRunWorktree({
+    mode: worktreeMode,
+    repoCwd: process.cwd(),
+    runId,
+    worktreeRoot: args.values["worktree-root"],
+    worktreePath: args.values["worktree-path"],
+    branchPrefix: args.values["branch-prefix"],
+    baseRef: args.values.base,
+    requirementSlug: path.basename(reqPath, path.extname(reqPath)),
+  });
+  const runsRoot = worktreeMode === "none" ? sequenceRunsRoot : allocation.runsRoot;
   const runDir = initRunDir(runsRoot, runId, requirementText);
-  const state = parseRunState({
+
+  const stateInput: Record<string, unknown> = {
     run_id: runId,
     complexity,
     phase: Phase.CREATED,
-  });
+  };
+  if (allocation.binding !== null) {
+    const bindingPath = worktreeBindingPath(runDir);
+    writeWorktreeBinding(bindingPath, allocation.binding);
+    stateInput.workdir = allocation.workdir;
+    stateInput.worktree_binding_path = bindingPath;
+  }
+  const state = parseRunState(stateInput);
   writeRunState(runDir, state);
 
-  process.stdout.write(`created run: ${runId} at ${runDir}\n`);
-  process.stdout.write(`phase: ${state.phase}, complexity: ${state.complexity}\n`);
+  process.stdout.write("created run: " + runId + " at " + runDir + "\n");
+  process.stdout.write("phase: " + state.phase + ", complexity: " + state.complexity + "\n");
+  if (state.workdir) {
+    process.stdout.write("workdir: " + state.workdir + "\n");
+  }
   return 0;
 }
 

@@ -86,6 +86,8 @@ export interface TickOptions {
   taskPlanYaml?: string | null;
   /** buildPacket / watchdog 写事件用: run 根目录。 */
   runDir?: string | null;
+  /** buildPacket / actual_writes 用: 真实代码工作目录。 */
+  workdir?: string | null;
 }
 
 /** 按当前 run 的复杂度档位取 watchdog 超时分钟数。 */
@@ -136,6 +138,7 @@ export function tick(
     options.capabilities ?? { git_diff: false, fs_snapshot: false };
   const now = options.now;
   const runDir = options.runDir ?? null;
+  const workdir = options.workdir ?? undefined;
   const designMd = options.designMd ?? "planning/design.md";
   const taskPlanYaml = options.taskPlanYaml ?? "planning/task-plan.yaml";
 
@@ -168,6 +171,7 @@ export function tick(
     const packet = buildPacket(taskObj, newPlan, runDir ?? ".", {
       designMd,
       taskPlanYaml,
+      workdir,
     });
 
     const collected = collectOutcome(taskObj, outcome, packet, capabilities, {
@@ -260,6 +264,7 @@ export function tick(
       const packet = buildPacket(runningTask, newPlan, runDir ?? ".", {
         designMd,
         taskPlanYaml,
+        workdir,
       });
       // 取派发前 snapshot (capabilities.fs_snapshot=true 时)。
       if (capabilities.fs_snapshot) {

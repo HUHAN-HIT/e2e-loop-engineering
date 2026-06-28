@@ -131,6 +131,8 @@ export const RunStateSchema = z
     active_tasks: z.array(z.string()).default([]),
     key_artifacts: z.array(z.string()).default([]),
     capabilities: RunCapabilitiesSchema.nullish().default(null),
+    workdir: z.string().nullish().default(null),
+    worktree_binding_path: z.string().nullish().default(null),
     config: RunConfigSchema.default({}),
     aborted_at: z.string().nullish().default(null),
     aborted_reason: z.string().nullish().default(null),

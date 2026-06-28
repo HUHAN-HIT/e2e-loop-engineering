@@ -53,6 +53,10 @@ import {
   parseRunState,
 } from "../../packages/ssot-ts/src/schema/run_state.js";
 import { parseTaskPlan } from "../../packages/ssot-ts/src/schema/task_plan.js";
+import {
+  worktreeBindingPath,
+  writeWorktreeBinding,
+} from "../../packages/ssot-ts/src/worktree/binding.js";
 import type { TaskPlan } from "../../packages/ssot-ts/src/schema/task_plan.js";
 
 // ---------------------------------------------------------------------------
@@ -621,4 +625,51 @@ test("[collect] 跨进程 collect: dispatch → 新建 Coordinator → collect �
   expect(result.verified).toBe(true);
   expect(coord2.plan!.tasks[0]!.status).toBe("complete");
   expect(result.all_complete).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// 13. worktree binding: dispatch packet 使用绑定 workdir
+// ---------------------------------------------------------------------------
+
+test("[dispatch] worktree binding 存在时 packet.workdir 使用 binding worktree_path", () => {
+  const root = makeTmp();
+  const runsRoot = path.join(root, "runs");
+  const workdir = path.join(root, ".worktrees", "20260628-013");
+  fs.mkdirSync(workdir, { recursive: true });
+  const plan = makePlan();
+  const runId = "20260628-013";
+  const runDir = initRunDir(runsRoot, runId, "worktree binding dispatch 测试");
+  writeWorktreeBinding(worktreeBindingPath(runDir), {
+    schema: "loop-engineering.worktree-binding.v1",
+    mode: "created",
+    owner: "loop-engineering",
+    repo_root: root,
+    worktree_path: workdir,
+    branch: "loop/20260628-013-worktree",
+    base_ref: "HEAD",
+    created_at: "2026-06-28T00:00:00.000Z",
+    managed: true,
+    status: "active",
+  });
+  writeRunState(
+    runDir,
+    parseRunState({
+      run_id: runId,
+      complexity: "simple",
+      phase: Phase.CREATED,
+      capabilities: NO_CAPS,
+    }),
+  );
+  fs.mkdirSync(path.join(runDir, "planning"), { recursive: true });
+  writeTaskPlan(path.join(runDir, "planning", "task-plan.yaml"), plan);
+
+  const coord = new Coordinator(runDir, new InlineWorkerRunner(noopWorker));
+  coord.startPlanning();
+  coord.submitPlan(plan);
+  coord.signoffPlan(true);
+  const packets = coord.dispatchReadyTasks();
+
+  expect(coord.workdir).toBe(workdir);
+  expect(packets[0]!.workdir).toBe(workdir);
+  expect(readDispatchMeta(runDir, "T01")!.packet.workdir).toBe(workdir);
 });

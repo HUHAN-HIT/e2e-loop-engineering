@@ -81,6 +81,7 @@ import {
   type DispatchMeta,
 } from "./directory.js";
 import { tick } from "./tick.js";
+import { readWorktreeBindingOrNull, worktreeBindingPath } from "../worktree/binding.js";
 import type { TickResult, TickRuntime } from "./tick.js";
 import { dumpKeyDiffsYaml } from "./yaml_io.js";
 
@@ -147,6 +148,7 @@ function nowUtc(): Date {
  */
 export class Coordinator {
   readonly runDir: string;
+  readonly workdir: string;
   private readonly runner: WorkerRunner;
   state: RunState;
   plan: TaskPlan | null = null;
@@ -167,12 +169,21 @@ export class Coordinator {
     this.runDir = runDir;
     this.runner = runner;
     this.state = readRunState(runDir);
+    const binding = readWorktreeBindingOrNull(runDir);
+    this.workdir = this.state.workdir ?? binding?.worktree_path ?? path.dirname(runDir);
+    if (binding !== null && (this.state.workdir === null || this.state.workdir === undefined)) {
+      this.state = {
+        ...this.state,
+        workdir: this.workdir,
+        worktree_binding_path: this.state.worktree_binding_path ?? worktreeBindingPath(runDir),
+      };
+    }
 
     // capabilities 探测 (§3.4 CREATED 时一次性写入 run-state, 此后固定):
     // 反序列化已有 → 沿用; 缺失 → probe 后挂到 state, 由下一次 refreshStateFile 顺带写回
     // (不在构造时立即写, 避免 Windows 文件锁 race + 减少 IO)。
     if (this.state.capabilities === null || this.state.capabilities === undefined) {
-      this.capabilities = probeCapabilities(path.dirname(runDir));
+      this.capabilities = probeCapabilities(this.workdir);
       this.state = { ...this.state, capabilities: this.capabilities };
     } else {
       this.capabilities = this.state.capabilities;
@@ -519,6 +530,7 @@ export class Coordinator {
       const packet = buildPacket(r, this.plan, this.runDir, {
         designMd,
         taskPlanYaml,
+        workdir: this.workdir,
       });
 
       // 取派发前 base_ref / fs snapshot (capabilities 决定是否真采)
@@ -642,7 +654,11 @@ export class Coordinator {
     }
     const packet: WorkerPacket =
       meta?.packet ??
-      buildPacket(task, this.plan, this.runDir, { designMd, taskPlanYaml });
+      buildPacket(task, this.plan, this.runDir, {
+        designMd,
+        taskPlanYaml,
+        workdir: this.workdir,
+      });
 
     // 从磁盘重建 outcome
     const outcome = this.reconstructOutcomeFromDisk(taskId);
@@ -929,6 +945,7 @@ export class Coordinator {
         designMd,
         taskPlanYaml,
         runDir: this.runDir,
+        workdir: this.workdir,
       },
     );
     this.state = newState;

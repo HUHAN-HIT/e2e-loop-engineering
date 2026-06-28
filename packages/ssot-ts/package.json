@@ -13,6 +13,7 @@
     "./amendment": "./src/amendment/index.ts",
     "./multi_service": "./src/multi_service/index.ts",
     "./trust_mode": "./src/trust_mode/index.ts",
+    "./worktree": "./src/worktree/index.ts",
     "./runtime": "./src/runtime/index.ts",
     "./dispatch": "./src/dispatch/index.ts",
     "./package.json": "./package.json"

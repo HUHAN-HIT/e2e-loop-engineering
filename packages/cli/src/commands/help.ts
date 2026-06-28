@@ -57,6 +57,8 @@ list 选项:
 
 dry-run 命令选项:
   init        <requirement.md> [--complexity <auto|simple|medium|complex>]
+              [--worktree-mode <none|auto|always|adopt>] [--worktree-root <dir>]
+              [--worktree-path <dir>] [--branch-prefix <prefix>] [--base <ref>]
   status      <run_id>
   plan        <run_id> --design <file> --task-plan <file>
   run         <run_id> [--max-ticks <n>]

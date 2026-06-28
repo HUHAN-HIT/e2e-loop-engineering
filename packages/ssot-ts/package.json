@@ -4,5 +4,24 @@
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
-  "description": "TS 实现的算法 SSOT；P4 阶段按 M1-M7 从 Python 渐进迁移。"
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts",
+    "./state_machine": "./src/state_machine/index.ts",
+    "./scheduling": "./src/scheduling/index.ts",
+    "./checklists": "./src/checklists/index.ts",
+    "./amendment": "./src/amendment/index.ts",
+    "./multi_service": "./src/multi_service/index.ts",
+    "./trust_mode": "./src/trust_mode/index.ts",
+    "./package.json": "./package.json"
+  },
+  "description": "TS 实现的算法 SSOT；P4 阶段按 M1-M7 从 Python 渐进迁移。",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23.0",
+    "@e2e-loop/shared": "*"
+  }
 }

@@ -14,6 +14,8 @@
     "./amendment": "./src/amendment/index.ts",
     "./multi_service": "./src/multi_service/index.ts",
     "./trust_mode": "./src/trust_mode/index.ts",
+    "./runtime": "./src/runtime/index.ts",
+    "./dispatch": "./src/dispatch/index.ts",
     "./package.json": "./package.json"
   },
   "description": "TS 实现的算法 SSOT；P4 阶段按 M1-M7 从 Python 渐进迁移。",
@@ -22,6 +24,7 @@
   },
   "dependencies": {
     "zod": "^3.23.0",
-    "@e2e-loop/shared": "*"
+    "@e2e-loop/shared": "*",
+    "js-yaml": "^4.1.0"
   }
 }

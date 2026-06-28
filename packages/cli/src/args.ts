@@ -20,6 +20,8 @@ export interface Args {
   values: Record<string, string | undefined>;
   flags: Set<string>;
   positional: string[];
+  /** --ac 多值收集 (amend 子命令用; 其它命令为空列表)。 */
+  acList: string[];
 }
 
 /**
@@ -43,6 +45,10 @@ export function parseCliArgs(tokens: string[]): Args {
 
   // 第二阶段: 解析剩余为 values + flags
   // option 形状: { type: "string" | "boolean", multiple?: boolean, short?: string }
+  //
+  // install/uninstall/list (P1~P3): host / project-dir / force / dry-run。
+  // dry-run 子命令 (P5-M7B): runs-root / complexity / design / task-plan / max-ticks /
+  //   reason / feedback (值参数), reject (开关), ac (多值, 收集成 acList)。
   const options = {
     host: { type: "string" as const },
     "project-dir": { type: "string" as const },
@@ -50,11 +56,23 @@ export function parseCliArgs(tokens: string[]): Args {
     "dry-run": { type: "boolean" as const },
     help: { type: "boolean" as const },
     h: { type: "boolean" as const },
+    // --- dry-run 子命令 ---
+    "runs-root": { type: "string" as const },
+    complexity: { type: "string" as const },
+    design: { type: "string" as const },
+    "task-plan": { type: "string" as const },
+    "max-ticks": { type: "string" as const },
+    reason: { type: "string" as const },
+    feedback: { type: "string" as const },
+    reject: { type: "boolean" as const },
+    // --ac 可多次出现, 收集为列表 (amend 触及的 AC ids)。
+    ac: { type: "string" as const, multiple: true as const },
   };
 
   const values: Record<string, string | undefined> = {};
   const flags = new Set<string>();
   const positional: string[] = [];
+  const acList: string[] = [];
 
   try {
     const parsed = parseArgs({
@@ -64,7 +82,14 @@ export function parseCliArgs(tokens: string[]): Args {
       strict: false,
     });
     for (const [k, v] of Object.entries(parsed.values)) {
-      if (typeof v === "string") {
+      if (Array.isArray(v)) {
+        // multiple:true 的选项 (目前仅 --ac) → 收集到 acList; 末值同时落 values 兜底。
+        if (k === "ac") {
+          acList.push(...v.filter((x): x is string => typeof x === "string"));
+        }
+        const last = v[v.length - 1];
+        if (typeof last === "string") values[k] = last;
+      } else if (typeof v === "string") {
         values[k] = v;
       } else if (v === true) {
         flags.add(k);
@@ -78,7 +103,7 @@ export function parseCliArgs(tokens: string[]): Args {
     throw new ArgParseError(`参数解析失败: ${msg}`);
   }
 
-  return { command, values, flags, positional };
+  return { command, values, flags, positional, acList };
 }
 
 /** 参数解析错误。 */

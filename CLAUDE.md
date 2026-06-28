@@ -31,17 +31,32 @@ pytest
 pytest tests/test_checks_eval.py
 pytest tests/test_integration_dry_run.py::test_end_to_end_simple_run
 
-# 把打包的 Claude 资产 (skill/agents/hooks/settings) 同步到目标项目的 .claude/
+# [DEPRECATED 共存期] 旧 Python CLI 仍可用 (loop-eng install-claude / init / status / plan / run);
+# Python 包已 deprecated, P4/P5 后算法权威是 TS SSOT (packages/ssot-ts), 新流程走下方 npm CLI。
 loop-eng install-claude --project-dir <target-project> --force
-
-# CLI dry-run (本地骨架验证, worker 用 echo 占位)
-loop-eng init <req.md>
-loop-eng status <run_id>
-loop-eng plan <run_id> --design <file> --task-plan <file>
-loop-eng run <run_id>
 ```
 
-无独立 lint/format 命令; pyproject.toml 仅配置了 pytest (`testpaths=["tests"]`, `addopts="-ra -q"`)。
+```powershell
+# === npm / TS 工具链 (P1-P5 已落地, 现为首选) ===
+npm install            # workspace 安装 (zod / js-yaml / 串包)
+npm run build          # 构建 adapter-cc hooks(.mjs) + adapter-oc plugin(.js) + cli bundle
+npx bun test tests-ts/ # TS 等价/集成测试 (设计 D-4 用 Bun; 本机经 npx bun@1.3.14)
+npx tsc --noEmit       # 类型检查
+
+# 落资产到目标项目 (cc=Claude Code, oc=OpenCode, both=双装)
+node packages/cli/dist/index.mjs install --host <cc|oc|both> --project-dir <target> [--force]
+node packages/cli/dist/index.mjs uninstall --host <cc|oc|both> --project-dir <target>
+node packages/cli/dist/index.mjs list --project-dir <target>
+
+# 算法 dry-run (本地骨架验证, worker 用 echo 占位; TS runtime, 与 Python 等价)
+node packages/cli/dist/index.mjs init <req.md>
+node packages/cli/dist/index.mjs plan <run_id> --design <file> --task-plan <file>
+node packages/cli/dist/index.mjs signoff-plan <run_id>
+node packages/cli/dist/index.mjs run <run_id>
+node packages/cli/dist/index.mjs status <run_id>
+```
+
+无独立 lint/format 命令; pyproject.toml 仅配置了 pytest (`testpaths=["tests"]`, `addopts="-ra -q"`)。TS 侧无 lint, 用 `tsc --noEmit` 把关。
 
 ## 架构 (跨多文件才能拼出的全景)
 

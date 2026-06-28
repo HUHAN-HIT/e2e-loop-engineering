@@ -15,7 +15,11 @@
     "baseUrl": ".",
     "paths": {
       "@e2e-loop/shared": ["packages/shared/src/index.ts"],
-      "@e2e-loop/adapter-claude-code": ["packages/adapter-cc/src/index.ts"]
+      "@e2e-loop/adapter-claude-code": ["packages/adapter-cc/src/index.ts"],
+      "@e2e-loop/ssot": ["packages/ssot-ts/src/index.ts"],
+      "@e2e-loop/ssot/runtime": ["packages/ssot-ts/src/runtime/index.ts"],
+      "@e2e-loop/ssot/dispatch": ["packages/ssot-ts/src/dispatch/index.ts"],
+      "@e2e-loop/ssot/schema": ["packages/ssot-ts/src/schema/index.ts"]
     }
   },
   "include": ["packages/*/src/**/*.ts"],

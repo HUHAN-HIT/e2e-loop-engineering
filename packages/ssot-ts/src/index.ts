@@ -20,3 +20,8 @@ export * as checklists from "./checklists/index.js";
 export * as amendment from "./amendment/index.js";
 export * as multiService from "./multi_service/index.js";
 export * as trustMode from "./trust_mode/index.js";
+
+// P5-M7A: runtime + dispatch (从 Python loop_engineering/{runtime,dispatch} 迁移)。
+// 命名空间导出, 与上面其余子包风格一致; 也可经子路径 @e2e-loop/ssot/{runtime,dispatch} import。
+export * as runtime from "./runtime/index.js";
+export * as dispatch from "./dispatch/index.js";

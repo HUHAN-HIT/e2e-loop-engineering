@@ -1,5 +1,18 @@
 """Loop Engineering — 协作式开发 harness (算法参考库).
 
+== 弃用通知 (DEPRECATION) ==
+
+本 Python 包已进入 **deprecated 共存期** (设计决策 D-2 / cross-host-design §9.5).
+P4/P5 已把全部算法迁到 TypeScript SSOT (packages/ssot-ts, 发布为 npm @e2e-loop/ssot):
+schema / state_machine / scheduling / checklists / amendment / multi_service /
+trust_mode / runtime / dispatch 均已有等价 TS 实现.
+
+- **新代码请用 @e2e-loop/ssot** (TS SSOT), 不要继续在本 Python 包上新增逻辑.
+- 本包在共存期内仍是**等价测试的权威锚点** (行为权威): TS 实现的等价测试以本包
+  对应模块的输出为对照基准, 守护两侧行为一致, 直到 1.0.0 删除本包.
+- 删除时机: 全部子包等价测试通过且 TS SSOT 成为唯一权威后, 在下一个大版本 (1.0.0)
+  移除 loop_engineering/ Python 包, 文档全切 `npm install -g e2e-loop`.
+
 规范源: loop-engineering-collaborative-design.md (本仓库 outputs/ 目录下).
 默认实现 collaborative 档 (design §5), MVP 范围 (design §7).
 

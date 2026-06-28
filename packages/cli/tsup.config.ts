@@ -16,6 +16,11 @@
  * frontmatter (见 packages/adapter-oc/src/render.ts)。adapter-oc 本身无独立 dist, 其 src 被
  * 本配置 noExternal 打进 CLI bundle; 因此 js-yaml 也必须一并 bundle, 否则
  * `node cli/dist/index.mjs install --host oc` 独立运行会因找不到 js-yaml 而报错。
+ *
+ * 注意 3: P5-M7B 的 dry-run 子命令接 @e2e-loop/ssot, 而 ssot 的 schema 层用了 zod。
+ * @e2e-loop/* 已被 noExternal 打进 bundle, 但其传递依赖 zod 默认仍被当外部 import;
+ * 为让 `node cli/dist/index.mjs init ...` 独立可跑 (无需在 cli/dist 旁装 node_modules),
+ * 必须把 zod 也一并 bundle 进单文件。
  */
 
 import { defineConfig } from "tsup";
@@ -31,10 +36,12 @@ export default defineConfig({
   outExtension: () => ({ js: ".mjs" }),
   target: "node20",
   platform: "node",
-  // 自包含: 把 @e2e-loop/* (shared / adapter-claude-code / adapter-opencode) 的源码打进单文件;
-  // 同时把 js-yaml 一并打进去 (adapter-oc 渲染 OC agent frontmatter 时依赖它,
-  // bundle 后独立运行需要它在场)。
-  noExternal: [/@e2e-loop\//, "js-yaml"],
+  // 自包含: 把 @e2e-loop/* (shared / adapter-claude-code / adapter-opencode / ssot) 的源码打进单文件;
+  // 同时把 js-yaml 与 zod 一并打进去:
+  //   - js-yaml: adapter-oc 渲染 OC agent frontmatter + ssot runtime 读写 task-plan.yaml 时依赖。
+  //   - zod:     ssot schema 层的运行期校验依赖 (dry-run 子命令经 @e2e-loop/ssot 传递引入)。
+  // bundle 后独立运行需要它们都在场。
+  noExternal: [/@e2e-loop\//, "js-yaml", "zod"],
   // node 内置模块保持外部 import
   external: [],
   splitting: false,

@@ -16,7 +16,8 @@
   "dependencies": {
     "@e2e-loop/shared": "*",
     "@e2e-loop/adapter-claude-code": "*",
-    "@e2e-loop/adapter-opencode": "*"
+    "@e2e-loop/adapter-opencode": "*",
+    "@e2e-loop/ssot": "*"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "loop-engineering"
 version = "0.1.0"
-description = "Collaborative Loop Engineering harness — schema, state machine, scheduling, checklists, dispatch."
+description = "[DEPRECATED, 共存期] Collaborative Loop Engineering harness (Python 算法 SSOT)。迁移目标是 TS SSOT (packages/ssot-ts, 发布为 npm @e2e-loop/ssot); 本 Python 包在共存期保留作等价测试锚点 (行为权威), 计划在 1.0.0 移除。"
 requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.5",

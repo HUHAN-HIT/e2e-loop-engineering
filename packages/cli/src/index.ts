@@ -20,7 +20,34 @@ import { printHelp } from "./commands/help.js";
 import { runInstall } from "./commands/install.js";
 import { runUninstall } from "./commands/uninstall.js";
 import { runList } from "./commands/list.js";
+import {
+  runInit,
+  runStatus,
+  runPlan,
+  runRun,
+  runWrapUp,
+  runSignoffPlan,
+  runSignoffWrapUp,
+  runAbort,
+  runAmend,
+} from "./commands/dryrun.js";
 import { InvalidHostError } from "./util.js";
+
+/**
+ * dry-run 子命令统一守卫: 捕获 Coordinator/runtime 抛出的运行期错误,
+ * 写友好信息到 stderr 并返回 1 (对齐 CLI "错误 → stderr + exit 1" 风格)。
+ *
+ * 命令函数自身的"参数缺失/文件不存在"已在内部返回 2; 这里只兜运行期 throw。
+ */
+function dryRunGuard(fn: () => number): number {
+  try {
+    return fn();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    process.stderr.write(`错误: ${msg}\n`);
+    return 1;
+  }
+}
 
 async function main(): Promise<number> {
   const tokens = process.argv.slice(2);
@@ -54,12 +81,34 @@ async function main(): Promise<number> {
   }
 
   switch (args.command) {
+    // --- 安装类 (P1~P3) ---
     case "install":
       return await runInstall(args);
     case "uninstall":
       return await runUninstall(args);
     case "list":
       return await runList(args);
+    // --- 算法 dry-run 类 (P5-M7B, 同步, 对齐 Python cli.py) ---
+    // 这些命令调 Coordinator, 可能抛运行期错误 (如 run-state 缺失、收口 gate 未过的签收拒绝)。
+    // 统一在 dryRunGuard 内捕获, 友好 stderr + exit 1, 不抛裸 stack。
+    case "init":
+      return dryRunGuard(() => runInit(args));
+    case "status":
+      return dryRunGuard(() => runStatus(args));
+    case "plan":
+      return dryRunGuard(() => runPlan(args));
+    case "run":
+      return dryRunGuard(() => runRun(args));
+    case "wrap-up":
+      return dryRunGuard(() => runWrapUp(args));
+    case "signoff-plan":
+      return dryRunGuard(() => runSignoffPlan(args));
+    case "signoff-wrap-up":
+      return dryRunGuard(() => runSignoffWrapUp(args));
+    case "abort":
+      return dryRunGuard(() => runAbort(args));
+    case "amend":
+      return dryRunGuard(() => runAmend(args));
     case undefined:
       process.stderr.write("错误: 缺少子命令\n\n");
       printHelp(process.stderr);

@@ -1,8 +1,36 @@
 {
   "name": "e2e-loop",
   "version": "0.3.0-alpha",
-  "private": true,
+  "description": "e2e loop engineering",
+  "homepage": "https://github.com/HUHAN-HIT/e2e-loop-engineering#readme",
+  "bugs": {
+    "url": "https://github.com/HUHAN-HIT/e2e-loop-engineering/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HUHAN-HIT/e2e-loop-engineering.git"
+  },
+  "license": "ISC",
+  "author": "baymax",
   "type": "module",
+  "bin": {
+    "e2e-loop": "bin/e2e-loop"
+  },
+  "main": "./packages/cli/dist/index.mjs",
+  "files": [
+    "bin/",
+    "core/",
+    "packages/cli/dist/index.mjs",
+    "packages/adapter-cc/dist/guard_anchors.mjs",
+    "packages/adapter-cc/dist/guard_paths.mjs",
+    "packages/adapter-cc/dist/post_task_collect.mjs",
+    "packages/adapter-cc/dist/probe_and_gate.mjs",
+    "packages/adapter-oc/dist/loop-engineering.js",
+    "README.md"
+  ],
+  "publishConfig": {
+    "tag": "alpha"
+  },
   "workspaces": [
     "packages/*"
   ],
@@ -11,6 +39,7 @@
     "build:adapter-oc-plugin": "tsup --config packages/adapter-oc/tsup.config.ts",
     "build:cli": "tsup --config packages/cli/tsup.config.ts",
     "build": "npm run build:adapter-cc && npm run build:adapter-oc-plugin && npm run build:cli",
+    "prepack": "npm run build",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

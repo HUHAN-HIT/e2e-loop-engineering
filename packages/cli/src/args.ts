@@ -49,6 +49,7 @@ export function parseCliArgs(tokens: string[]): Args {
   // install/uninstall/list (P1~P3): host / project-dir / force / dry-run。
   // dry-run 子命令 (P5-M7B): runs-root / complexity / design / task-plan / max-ticks /
   //   reason / feedback (值参数), reject (开关), ac (多值, 收集成 acList)。
+  // P5-M7C 新增真实 run 命令 (dispatch / collect-outcome) 用 --task 单值参数。
   const options = {
     host: { type: "string" as const },
     "project-dir": { type: "string" as const },
@@ -69,6 +70,9 @@ export function parseCliArgs(tokens: string[]): Args {
     reject: { type: "boolean" as const },
     // --ac 可多次出现, 收集为列表 (amend 触及的 AC ids)。
     ac: { type: "string" as const, multiple: true as const },
+    // --- 真实 run 子命令 (M7C) ---
+    // --task <id>: collect-outcome 必需, 指定要校验的 task_id
+    task: { type: "string" as const },
   };
 
   const values: Record<string, string | undefined> = {};

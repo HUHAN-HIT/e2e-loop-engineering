@@ -31,6 +31,8 @@ import {
   runSignoffWrapUp,
   runAbort,
   runAmend,
+  runDispatch,
+  runCollectOutcome,
 } from "./commands/dryrun.js";
 import { InvalidHostError } from "./util.js";
 
@@ -112,6 +114,11 @@ async function main(): Promise<number> {
       return dryRunGuard(() => runAbort(args));
     case "amend":
       return dryRunGuard(() => runAmend(args));
+    // --- 真实 run 命令 (P5-M7C, 主 agent 当 coordinator, 触发 Task 工具派子 agent) ---
+    case "dispatch":
+      return dryRunGuard(() => runDispatch(args));
+    case "collect-outcome":
+      return dryRunGuard(() => runCollectOutcome(args));
     case undefined:
       process.stderr.write("错误: 缺少子命令\n\n");
       printHelp(process.stderr);

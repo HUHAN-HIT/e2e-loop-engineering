@@ -22,11 +22,20 @@ import * as yaml from "js-yaml";
 import { applyRollback, computeRollback, summarize } from "../amendment/rollback.js";
 import { checkPlan } from "../checklists/plan_check.js";
 import { checkWrapUp } from "../checklists/wrap_up_check.js";
-import type { TaskCheckResult } from "../checklists/task_check.js";
+import type { TaskCheckItem, TaskCheckResult } from "../checklists/task_check.js";
 import { pathGlobsOverlap } from "../scheduling/path_overlap.js";
+import { readyFrontier } from "../scheduling/ready_frontier.js";
 import { probeCapabilities } from "../scheduling/capabilities.js";
 import { isMeaningful } from "../schema/artifacts.js";
-import type { KeyDiffsFile, PlanAmendmentNeeded } from "../schema/artifacts.js";
+import {
+  KeyDiffsFileSchema,
+  TestResultsSchema,
+} from "../schema/artifacts.js";
+import type {
+  KeyDiffsFile,
+  PlanAmendmentNeeded,
+  TestResults,
+} from "../schema/artifacts.js";
 import { parseClarificationQuestions } from "../schema/clarification.js";
 import type {
   ClarificationAnswers,
@@ -36,6 +45,7 @@ import { HumanPending, Phase } from "../schema/run_state.js";
 import type { RunCapabilities, RunState } from "../schema/run_state.js";
 import { parseServiceContracts } from "../schema/service_contracts.js";
 import type { ServiceContracts } from "../schema/service_contracts.js";
+import { TaskStatus } from "../schema/task_plan.js";
 import type { TaskPlan } from "../schema/task_plan.js";
 import {
   clearHumanPending,
@@ -43,18 +53,86 @@ import {
   setHumanPending,
 } from "../state_machine/human_anchors.js";
 import { advancePhase, isTerminal } from "../state_machine/transitions.js";
-import type { WorkerRunner } from "../dispatch/worker_runner.js";
+import { buildPacket } from "../dispatch/packet.js";
+import type { WorkerPacket } from "../dispatch/packet.js";
 import {
+  collectOutcome,
+  takeFsSnapshot,
+  takeGitBaseRef,
+} from "../dispatch/collect.js";
+import type { CollectedTaskResult, FsSnapshot } from "../dispatch/collect.js";
+import { makeWorkerOutcome } from "../dispatch/worker_runner.js";
+import type { WorkerOutcome, WorkerRunner } from "../dispatch/worker_runner.js";
+import {
+  actualWritesPath,
+  dispatchMetaPath,
   initTaskDir,
+  readActualWrites,
+  readDispatchMeta,
   readRunState,
   readTaskPlan,
+  writeActualWrites,
+  writeCollectFailures,
+  writeDispatchMeta,
   writeRunState,
   writeTaskPlan,
+  type ActualWritesFile,
+  type CollectFailures,
+  type DispatchMeta,
 } from "./directory.js";
-import type { CollectedTaskResult, FsSnapshot } from "../dispatch/collect.js";
 import { tick } from "./tick.js";
 import type { TickResult, TickRuntime } from "./tick.js";
 import { dumpKeyDiffsYaml } from "./yaml_io.js";
+
+// ---------------------------------------------------------------------------
+// CollectCliResult: `collect-outcome` 命令的返回形状 (stdout JSON)
+// ---------------------------------------------------------------------------
+
+/**
+ * `loop-eng collect-outcome` 命令的 stdout 输出形状。
+ *
+ * 主 agent 据 verified / reason / failures / max_retries_exceeded 决定下一步:
+ * - verified=true → 跑 dispatch 拿下一批 (advanced_to 给出下一个 ready task_id 提示)
+ * - reason=plan_amendment → 跑 `loop-eng amend` 处理 (不派 fix 子 agent)
+ * - reason=task_check_fail / failed / oob → 派 fix 子 agent (prompt 带 failures + oob_paths)
+ * - max_retries_exceeded=true → 主 agent 决定 abort 或人接
+ *
+ * actual_writes_source 让主 agent 判断 collect 可信度:
+ * - "git_diff" / "fs_snapshot" → 可信 (authoritative)
+ * - "worker_self_report" → 不可信 (bootstrap 降级 / capabilities 缺失)
+ */
+export interface CollectCliResult {
+  readonly task_id: string;
+  /** 自检全过且无越界 = true。 */
+  readonly verified: boolean;
+  /**
+   * 失败原因分类:
+   * - "passed": 通过
+   * - "task_check_fail": 任务自检未通过 (测试/AC/路径)
+   * - "failed": outcome.status=failed (worker 自报失败或 artifact 全缺)
+   * - "oob": actual_writes 越界 (优先级高于 task_check_fail)
+   * - "plan_amendment": 触发 plan 修正 (已自动 handlePlanAmendment, 主 agent 走 amend)
+   * - "not_running": task 不是 running 状态 (未 dispatch 或已 complete)
+   * - "not_found": task 在 plan 里找不到
+   */
+  readonly reason: string;
+  readonly task_check_all_pass: boolean;
+  /** 全部自检项 (含通过的); 主 agent 可全量回看。 */
+  readonly failures: TaskCheckItem[];
+  /** 越界路径列表 (reason=oob 时非空)。 */
+  readonly oob_paths: string[];
+  /** "git_diff" | "fs_snapshot" | "worker_self_report" */
+  readonly actual_writes_source: string;
+  /** 下一个 ready task_id (无则 ""); 提示主 agent 下一步可派谁。 */
+  readonly advanced_to: string;
+  /** 全部 task 是否都已 complete (自动 submitWrapUp 触发标志)。 */
+  readonly all_complete: boolean;
+  /** 当前重试次数 (dispatch 时递增; collect 失败不递增)。 */
+  readonly attempt: number;
+  readonly max_retries_per_task: number;
+  /** attempt ≥ max_retries_per_task 且本次未通过 → true (主 agent 决策权)。 */
+  readonly max_retries_exceeded: boolean;
+}
 
 /** UTC 当前时间。 */
 function nowUtc(): Date {
@@ -386,6 +464,443 @@ export class Coordinator {
     this.state = advancePhase(this.state, Phase.ABORTED, reason);
     this.refreshStateFile();
   }
+
+  // ------------------------------------------------------------------
+  // 真实 run (非 dryrun): dispatch / collect-outcome
+  //
+  // 这两个方法不调 runner, 不进 tick 循环。主 agent (Claude Code 主上下文) 当协调器:
+  // 1. dispatch → 标 ready task running + 落 dispatch.json + 返回 packets
+  // 2. 主 agent 对每个 packet 用 Task 工具触发 implementation-worker 子 agent
+  // 3. collect-outcome → 读 dispatch.json + 磁盘 artifact, 校验, 推进状态 / 留 running
+  //
+  // 跨进程持久化: dispatch.json (派发元数据) / collect-failures.json (失败详情) /
+  // actual-writes.json (跨 task 越界检测重建用)。
+  // ------------------------------------------------------------------
+
+  /**
+   * 推进状态机: 选 ready task, 标 running, 落 dispatch.json, 返回 packets。
+   *
+   * 调用方 (主 agent) 拿 packets JSON, 用 Task 工具触发 implementation-worker。
+   *
+   * @throws Error phase≠IMPLEMENTING 或 plan 为空
+   * @returns WorkerPacket[] (可能多个, 主 agent 决定并发; 简单档一般只一个)
+   */
+  dispatchReadyTasks(): WorkerPacket[] {
+    if (this.state.phase !== Phase.IMPLEMENTING) {
+      throw new Error(
+        `dispatchReadyTasks 必须在 IMPLEMENTING phase (当前 ${this.state.phase})`,
+      );
+    }
+    if (this.plan === null) {
+      throw new Error("dispatchReadyTasks 时 plan 为空");
+    }
+
+    const activeTaskObjs = this.plan.tasks.filter((t) =>
+      this.state.active_tasks.includes(t.id),
+    );
+    const ready = readyFrontier(this.plan.tasks, activeTaskObjs);
+    if (ready.length === 0) return [];
+
+    const designMd = path.join(this.runDir, "planning", "design.md");
+    const taskPlanYaml = path.join(this.runDir, "planning", "task-plan.yaml");
+    // 占位 design.md (与 runTick 一致, 测试用)
+    if (!fs.existsSync(designMd)) {
+      fs.mkdirSync(path.dirname(designMd), { recursive: true });
+      fs.writeFileSync(designMd, "# Design (placeholder)\n", "utf-8");
+    }
+
+    const packets: WorkerPacket[] = [];
+    const newTasks = [...this.plan.tasks];
+    const newActive = [...this.state.active_tasks];
+
+    for (const r of ready) {
+      initTaskDir(this.runDir, r.id);
+
+      const packet = buildPacket(r, this.plan, this.runDir, {
+        designMd,
+        taskPlanYaml,
+      });
+
+      // 取派发前 base_ref / fs snapshot (capabilities 决定是否真采)
+      const baseRef = this.capabilities.git_diff
+        ? takeGitBaseRef(packet.workdir)
+        : null;
+      const beforeSnapshot = this.capabilities.fs_snapshot
+        ? takeFsSnapshot(packet.workdir)
+        : null;
+
+      // attempt 递增 (永远绑定"实际派发次数")
+      const newAttempt = r.attempt + 1;
+
+      // 先写 dispatch.json (崩溃恢复: 文件在, 状态机就能重建)
+      const meta: DispatchMeta = {
+        task_id: r.id,
+        dispatched_at: nowUtc().toISOString(),
+        base_ref: baseRef,
+        before_snapshot: beforeSnapshot,
+        attempt: newAttempt,
+        packet,
+      };
+      writeDispatchMeta(this.runDir, r.id, meta);
+
+      // 翻 running + 递增 attempt
+      const idx = newTasks.findIndex((t) => t.id === r.id);
+      if (idx !== -1) {
+        newTasks[idx] = {
+          ...newTasks[idx]!,
+          status: TaskStatus.running,
+          attempt: newAttempt,
+        };
+      }
+      if (!newActive.includes(r.id)) newActive.push(r.id);
+
+      // 同步内部 map (供同进程多次调用用; 跨进程从 dispatch.json 重建)
+      this.startedAtByTask.set(r.id, nowUtc());
+      if (beforeSnapshot !== null) {
+        this.beforeSnapshots.set(r.id, beforeSnapshot);
+      }
+      if (baseRef !== null) {
+        this.baseRefs.set(r.id, baseRef);
+      }
+
+      packets.push(packet);
+    }
+
+    this.plan = { ...this.plan, tasks: newTasks };
+    this.state = { ...this.state, active_tasks: newActive };
+    this.refreshStateFile();
+    this.refreshPlanFile();
+
+    return packets;
+  }
+
+  /**
+   * 收回单个 task 的 outcome, 跑 collectOutcome 校验, 推进状态或留 running。
+   *
+   * 通过: 标 complete + 落 key-diffs/summary/actual-writes + 触发 submitWrapUp (若全完)
+   * 失败: 留 running + 落 collect-failures.json + 不递增 attempt (由下次 dispatch 递增)
+   * plan_amendment: 自动 handlePlanAmendment + 返回 reason="plan_amendment"
+   *
+   * bootstrap 降级: dispatch.json 不存在但磁盘有 artifact → 用空 base_ref/snapshot 降级,
+   * actual_writes 退化为 worker_self_report (主 agent 看 actual_writes_source 判断可信度)。
+   *
+   * @throws Error phase≠IMPLEMENTING 或 plan 为空
+   */
+  collectTaskOutcome(taskId: string): CollectCliResult {
+    if (this.state.phase !== Phase.IMPLEMENTING) {
+      throw new Error(
+        `collectTaskOutcome 必须在 IMPLEMENTING phase (当前 ${this.state.phase})`,
+      );
+    }
+    if (this.plan === null) {
+      throw new Error("collectTaskOutcome 时 plan 为空");
+    }
+
+    const maxRetries = this.state.config.max_retries_per_task;
+    const designMd = path.join(this.runDir, "planning", "design.md");
+    const taskPlanYaml = path.join(this.runDir, "planning", "task-plan.yaml");
+
+    const taskIdx = this.plan.tasks.findIndex((t) => t.id === taskId);
+    if (taskIdx === -1) {
+      return this.mkCollectResult(taskId, {
+        verified: false,
+        reason: "not_found",
+        task_check_all_pass: false,
+        failures: [],
+        oob_paths: [],
+        actual_writes_source: "unavailable",
+        advanced_to: "",
+        all_complete: false,
+        attempt: 0,
+        max_retries_per_task: maxRetries,
+      });
+    }
+    const task = this.plan.tasks[taskIdx]!;
+
+    if (task.status !== TaskStatus.running) {
+      return this.mkCollectResult(taskId, {
+        verified: false,
+        reason: "not_running",
+        task_check_all_pass: false,
+        failures: [],
+        oob_paths: [],
+        actual_writes_source: "unavailable",
+        advanced_to: "",
+        all_complete: false,
+        attempt: task.attempt,
+        max_retries_per_task: maxRetries,
+      });
+    }
+
+    // 读 dispatch.json (bootstrap 降级关键)
+    const meta = readDispatchMeta(this.runDir, taskId);
+    const warnings: string[] = [];
+    if (meta === null) {
+      warnings.push(
+        "dispatch.json 不存在 → bootstrap 降级: actual_writes 退化为 worker_self_report (不可信)",
+      );
+    }
+    const packet: WorkerPacket =
+      meta?.packet ??
+      buildPacket(task, this.plan, this.runDir, { designMd, taskPlanYaml });
+
+    // 从磁盘重建 outcome
+    const outcome = this.reconstructOutcomeFromDisk(taskId);
+
+    // 跨进程 earlierTaskWrites 重建
+    const earlierTaskWrites = this.rebuildEarlierTaskWrites();
+
+    // 跑 collectOutcome
+    const collected = collectOutcome(
+      task,
+      outcome,
+      packet,
+      this.capabilities,
+      {
+        baseRef: meta?.base_ref ?? null,
+        beforeSnapshot: meta?.before_snapshot ?? null,
+        earlierTaskWrites,
+      },
+    );
+
+    // 落 warnings 到日志 (主 agent 可读)
+    if (warnings.length > 0) {
+      const logPath = path.join(
+        this.runDir,
+        "tasks",
+        taskId,
+        "logs",
+        "collect-warnings.txt",
+      );
+      fs.mkdirSync(path.dirname(logPath), { recursive: true });
+      fs.writeFileSync(logPath, `${warnings.join("\n")}\n`, "utf-8");
+    }
+
+    // 分支 1: plan_amendment
+    if (outcome.plan_amendment !== null) {
+      this.handlePlanAmendment(outcome.plan_amendment);
+      this.refreshStateFile();
+      if (this.plan !== null) this.refreshPlanFile();
+      return this.mkCollectResult(taskId, {
+        verified: false,
+        reason: "plan_amendment",
+        task_check_all_pass: collected.task_check_result.all_pass,
+        failures: collected.task_check_result.items,
+        oob_paths: collected.oob.out_of_bounds,
+        actual_writes_source: collected.actual_writes.source,
+        advanced_to: "",
+        all_complete: false,
+        attempt: task.attempt,
+        max_retries_per_task: maxRetries,
+      });
+    }
+
+    // 分支 2: 通过 (自检全过 + 无越界)
+    if (collected.task_check_result.all_pass && !collected.oob.is_oob) {
+      const newTasks = [...this.plan.tasks];
+      newTasks[taskIdx] = { ...task, status: TaskStatus.complete };
+      this.plan = { ...this.plan, tasks: newTasks };
+
+      const newActive = this.state.active_tasks.filter((id) => id !== taskId);
+      this.state = { ...this.state, active_tasks: newActive };
+
+      // 落 key-diffs.yaml
+      if (outcome.key_diffs_file !== null) {
+        const kdPath = path.join(this.runDir, "tasks", taskId, "key-diffs.yaml");
+        fs.mkdirSync(path.dirname(kdPath), { recursive: true });
+        fs.writeFileSync(kdPath, dumpKeyDiffsYaml(outcome.key_diffs_file), "utf-8");
+        this.keyDiffsByTask.set(taskId, outcome.key_diffs_file);
+      }
+
+      // 落 summary.md
+      const summaryPath = path.join(this.runDir, "tasks", taskId, "summary.md");
+      fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
+      fs.writeFileSync(
+        summaryPath,
+        outcome.summary_text || "(empty summary)",
+        "utf-8",
+      );
+
+      // 落 actual-writes.json (后续 task collect-outcome 跨进程重建 earlierTaskWrites 用)
+      const awData: ActualWritesFile = {
+        source: collected.actual_writes.source,
+        is_authoritative: collected.actual_writes.is_authoritative,
+        writes: [...collected.actual_writes.writes],
+      };
+      writeActualWrites(this.runDir, taskId, awData);
+
+      // 缓存 (供同进程 + 收口自检用)
+      this.taskCheckResults.set(taskId, collected.task_check_result);
+      this.earlierTaskWrites.set(taskId, [...collected.actual_writes.writes]);
+      this.startedAtByTask.delete(taskId);
+
+      initTaskDir(this.runDir, taskId);
+
+      this.refreshStateFile();
+      this.refreshPlanFile();
+
+      // 全完自动 submitWrapUp
+      const allComplete =
+        this.plan.tasks.length > 0 &&
+        this.plan.tasks.every((t) => t.status === TaskStatus.complete);
+      if (allComplete && this.state.phase === Phase.IMPLEMENTING) {
+        this.submitWrapUp();
+      }
+
+      // 下一个 ready task_id 提示
+      const nextReady =
+        readyFrontier(this.plan.tasks, [])[0]?.id ?? "";
+
+      return this.mkCollectResult(taskId, {
+        verified: true,
+        reason: "passed",
+        task_check_all_pass: true,
+        failures: collected.task_check_result.items,
+        oob_paths: [],
+        actual_writes_source: collected.actual_writes.source,
+        advanced_to: nextReady,
+        all_complete: allComplete,
+        attempt: task.attempt,
+        max_retries_per_task: maxRetries,
+      });
+    }
+
+    // 分支 3: 失败 (留 running, 不递增 attempt)
+    const reason =
+      outcome.status === "failed"
+        ? "failed"
+        : collected.oob.is_oob
+          ? "oob"
+          : "task_check_fail";
+
+    const failures: CollectFailures = {
+      task_id: taskId,
+      reason,
+      failures: collected.task_check_result.items.filter((i) => !i.passed),
+      oob_paths: [...collected.oob.out_of_bounds],
+      attempt: task.attempt,
+      collected_at: nowUtc().toISOString(),
+    };
+    writeCollectFailures(this.runDir, taskId, failures);
+
+    return this.mkCollectResult(taskId, {
+      verified: false,
+      reason,
+      task_check_all_pass: collected.task_check_result.all_pass,
+      failures: collected.task_check_result.items,
+      oob_paths: [...collected.oob.out_of_bounds],
+      actual_writes_source: collected.actual_writes.source,
+      advanced_to: "",
+      all_complete: false,
+      attempt: task.attempt,
+      max_retries_per_task: maxRetries,
+    });
+  }
+
+  /**
+   * 构造 CollectCliResult (补 max_retries_exceeded 计算)。
+   *
+   * max_retries_exceeded 仅在未通过且 attempt 已达上限时为 true (主 agent 拿决策权)。
+   */
+  private mkCollectResult(
+    taskId: string,
+    fields: Omit<CollectCliResult, "max_retries_exceeded" | "task_id">,
+  ): CollectCliResult {
+    const exceeded =
+      !fields.verified &&
+      fields.reason !== "not_found" &&
+      fields.reason !== "not_running" &&
+      fields.attempt >= fields.max_retries_per_task;
+    return { ...fields, task_id: taskId, max_retries_exceeded: exceeded };
+  }
+
+  /**
+   * 从磁盘 artifact 重建 WorkerOutcome (collect-outcome 用)。
+   *
+   * 读 tasks/<tid>/test-results.yaml + summary.md + key-diffs.yaml, 组装 outcome。
+   * 三个文件全缺 → status="failed" (worker 没产出任何东西)。
+   * 任一文件 schema 不合法 → 该字段退化为 null (不抛错, 让 task_check 自然判 fail)。
+   */
+  private reconstructOutcomeFromDisk(taskId: string): WorkerOutcome {
+    const base = path.join(this.runDir, "tasks", taskId);
+
+    let testResults: TestResults | null = null;
+    const trPath = path.join(base, "test-results.yaml");
+    if (fs.existsSync(trPath)) {
+      try {
+        const raw = yaml.load(fs.readFileSync(trPath, "utf-8"));
+        testResults = TestResultsSchema.parse(raw);
+      } catch {
+        testResults = null;
+      }
+    }
+
+    let summaryText = "";
+    const sumPath = path.join(base, "summary.md");
+    if (fs.existsSync(sumPath)) {
+      summaryText = fs.readFileSync(sumPath, "utf-8");
+    }
+
+    let keyDiffsFile: KeyDiffsFile | null = null;
+    const kdPath = path.join(base, "key-diffs.yaml");
+    if (fs.existsSync(kdPath)) {
+      try {
+        const raw = yaml.load(fs.readFileSync(kdPath, "utf-8"));
+        keyDiffsFile = KeyDiffsFileSchema.parse(raw);
+      } catch {
+        keyDiffsFile = null;
+      }
+    }
+
+    // 三全缺 → failed
+    if (testResults === null && summaryText === "" && keyDiffsFile === null) {
+      return makeWorkerOutcome({
+        status: "failed",
+        failure_reason: `no artifacts produced (looked in ${base})`,
+      });
+    }
+
+    return makeWorkerOutcome({
+      status: "completed",
+      test_results: testResults,
+      summary_text: summaryText,
+      key_diffs_file: keyDiffsFile,
+    });
+  }
+
+  /**
+   * 跨进程重建 earlierTaskWrites (越界检测第 2 层用)。
+   *
+   * 遍历 complete task, 先看内存 map (同进程缓存); 缺则从 actual-writes.json 读。
+   * actual-writes.json 缺失 (旧版本/手改) → 该 task 不贡献路径, 保守放过。
+   */
+  private rebuildEarlierTaskWrites(): Record<string, string[]> {
+    const result: Record<string, string[]> = {};
+    if (this.plan === null) return result;
+
+    for (const task of this.plan.tasks) {
+      if (task.status !== TaskStatus.complete) continue;
+
+      const cached = this.earlierTaskWrites.get(task.id);
+      if (cached !== undefined) {
+        result[task.id] = [...cached];
+        continue;
+      }
+
+      const aw = readActualWrites(this.runDir, task.id);
+      if (aw !== null && Array.isArray(aw.writes)) {
+        result[task.id] = aw.writes.filter(
+          (x): x is string => typeof x === "string",
+        );
+      }
+    }
+
+    return result;
+  }
+
+  /** (公开 readDispatchMeta / actualWritesPath 给 CLI 或测试用; 兼容 export) */
+  static readonly dispatchMetaPath = dispatchMetaPath;
+  static readonly actualWritesPath = actualWritesPath;
 
   // ------------------------------------------------------------------
   // tick 循环

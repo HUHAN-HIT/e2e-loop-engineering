@@ -8,7 +8,7 @@ metadata:
   standards: glossary,clarification,plan,test-design,implementation,review
 ---
 
-# Loop Engineering (Claude Code 协作式 harness)
+# Loop Engineering
 
 ## 如何使用本 skill
 
@@ -164,6 +164,50 @@ dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**
 过 → 置 complete,解锁下游;不过 → 退回同一角色修一次,仍不过升级给人。
 
 **计划修正快路径:** 实施角色发现某 planned 用例不可执行或本身错了 → 不要硬做,返回 `{ status:"plan-amendment-needed", reason, touched_acceptance_refs:[...] }`(**必须声明触及的 AC**),只回到 PLANNING 修受影响的部分,不重开整个计划。你据 `touched_acceptance_refs` 反查 AC↔task 映射做确定性回滚:与之相交的 complete task 降级待重验、running task 召回重派,不相交的不动 (AC↔task 索引构建参考 `loop_engineering/amendment/ac_index.py:build_ac_to_tasks`, 保守扩围规则参考 `loop_engineering/amendment/rollback.py:expand_acceptance_refs`);仅当改变验收语义才重新拍板,纯测试修正不惊动人。
+
+### 阶段 3 补充 · CLI 分发模式(真实 run, 非 dryrun)
+
+上面描述的是"角色应做什么"。本节给出 **coordinator 端用 CLI 把 packet 推到磁盘、再用 Task 工具派子 agent** 的具体循环。**真实 run 不要用 `loop-eng run <run_id>`** —— 那是 dryrun 档,worker 是 echo 占位,不会真改代码。真实分发用 `dispatch` + `collect-outcome` 两步循环 (设计 §3.7 单 tick 顺序, §0.4 artifact-first)。
+
+**分发循环(每个 tick 重复到 `all_complete=true`):**
+
+1. **dispatch:** 跑 `loop-eng dispatch <run_id>` → 输出 ready packets 的 JSON 数组(每个含 `task_id` / `attempt` / `allowed_write_paths` / packet body)。`dispatch` 时该 task 的 `attempt` **自动递增**,task 翻 `running` 并落 `tasks/<tid>/dispatch.json`(Coordinator 单写者)。
+2. **派子 agent:** 对每个 packet,用 **Task 工具**(`subagent_type=implementation-worker`)派 implementation-worker 子 agent,首条消息把 packet body 整块发过去。子 agent 在隔离上下文里跑测试→实现→产 artifact。
+3. **collect-outcome:** 子 agent 返回后,跑 `loop-eng collect-outcome <run_id> --task <tid>`。它独立重算 `actual_writes`(git diff > fs snapshot > 自报告)、跑任务自检、把结果写到 `tasks/<tid>/collect-outcome.json` 与 `tasks/<tid>/actual-writes.json`、按结果置 task `complete` 或留 `running`(Coordinator 单写者)。
+4. 通过 → 回第 1 步拿下一批 ready packet;`all_complete=true` → 进 WRAPPING_UP。
+
+**fix-once 流程(collect-outcome 失败时):**
+
+1. 读 `runs/<id>/tasks/<tid>/collect-failures.json` 拿失败详情,按 `reason` 分流:
+   - `plan_amendment` → **不派 fix 子 agent**,跑 `loop-eng amend <run_id> ...` 走计划修正快路径(见上文)。
+   - `task_check_fail` / `failed` / `oob`(越界写)→ 派 implementation-worker 子 agent,prompt = 原 packet + failures 详情(哪个 case 红、哪个路径越界、缺哪个 artifact),子 agent 修复后**重写**自己的 artifact。
+2. 子 agent 修完返回后,**主 agent 再跑 `loop-eng dispatch <run_id>`**(同 task 重派发,`attempt` 自动递增),再跑 `collect-outcome` 校验。
+3. 输出 `max_retries_exceeded=true` 时 → 主 agent 决定:回退到人接(`human_pending`)还是 `abort`(给 reason)。**不要无限重试。**
+
+**attempt 语义(关键):** `dispatch` 时递增、`collect-outcome` 失败时**不**递增(只把 task 留在 `running` 等下一次 dispatch)。这保证一次 worker 会话 = 一个 attempt 号,attempt 不因校验失败白白累加。
+
+**写权限红线(worker 子 agent 单写者边界,设计 §0.2 防糊弄 / §0.4 artifact-first):**
+
+worker(子 agent)**只能写**:
+- `runs/<id>/tasks/<tid>/test-results.yaml`
+- `runs/<id>/tasks/<tid>/summary.md`
+- `runs/<id>/tasks/<tid>/key-diffs.yaml`
+- 该 task `allowed_write_paths` 范围内的源码
+
+worker **绝对不能写**(都是 Coordinator 单写者或阶段禁写):
+- `runs/<id>/tasks/<tid>/dispatch.json`(Coordinator 单写者)
+- `runs/<id>/tasks/<tid>/collect-failures.json`(Coordinator 单写者)
+- `runs/<id>/tasks/<tid>/actual-writes.json`(Coordinator 单写者)
+- `runs/<id>/planning/**`(IMPLEMENTING 阶段全段禁写)
+- `runs/<id>/run-state.json`(Coordinator 单写者)
+
+发现 worker 越界写上述任一文件 → 视为糊弄,触发 fix-once(走 `oob` 分支);二次再犯 → 不再相信该 worker,prompt 上报告人。
+
+**bootstrap 降级(看 collect-outcome 输出的 `actual_writes_source` 字段):**
+
+- `"git_diff"` 或 `"fs_snapshot"` → **可信**(authoritative),越界检测两层(范围 OOB + 跨 task 冲突)都硬执行。
+- `"worker_self_report"` → **不可信**:OOB 第 2 层(跨 task 冲突)退化为软约束(无法独立核对),主 agent 应提高警惕,优先靠 worker 的 summary 自陈 + 收口 diff 兜底。
+- `"unavailable"` → 完全没采集到,越界检测失效。主 agent 应**考虑 abort 或人接**,不要静默继续——没有 actual_writes 的 run 无法在收口诚实地呈 diff 给人。
 
 ### 阶段 4 · 收口(WRAPPING_UP)
 

@@ -31,6 +31,7 @@ import {
   readTaskPlan,
   writeRunState,
   writeTaskPlan,
+  type CollectCliResult,
 } from "@e2e-loop/ssot/runtime";
 import {
   InlineWorkerRunner,
@@ -420,5 +421,101 @@ export function runAmend(args: Args): number {
   process.stdout.write(
     `run ${runId}: amendment 已应用, phase=${coord.state.phase}\n`,
   );
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// dispatch / collect-outcome (P5-M7C 真实 run 命令)
+//
+// 主 agent 当 coordinator, 推进状态机 + 触发 Task 工具派 implementation-worker。
+// 与 dry-run `run` 命令的区别: 不调 echo worker, 不进 tick 循环。
+//
+// 主流程:
+//   1. dispatch <run_id> → 主 agent 拿 packets JSON
+//   2. 主 agent 对每个 packet 用 Task 工具触发 implementation-worker 子 agent
+//   3. collect-outcome <run_id> --task <id> → 校验 + 推进状态 / 留 running
+//   4. 失败 → 主 agent 读 collect-failures.json → 派 fix 子 agent → 再次 dispatch + collect
+// ---------------------------------------------------------------------------
+
+/**
+ * dispatch 子命令: 推进状态机, 输出 ready packets。
+ *
+ * 用法: e2e-loop dispatch <run_id> [--runs-root <dir>]
+ *
+ * stdout (JSON 行):
+ *   {"run_id": "...", "phase": "IMPLEMENTING", "packets": [...], "all_complete": false}
+ *
+ * 主 agent 解析 packets, 对每个 packet 用 Task 工具触发 implementation-worker。
+ * packets 为空数组表示无 ready task (全部 complete 或全部 running)。
+ */
+export function runDispatch(args: Args): number {
+  const runId = positional(args, 0);
+  if (!runId) {
+    process.stderr.write("错误: dispatch 需要位置参数 <run_id>\n");
+    return 2;
+  }
+  const runsRoot = resolveRunsRoot(args);
+  const runDir = resolveRunDir(runsRoot, runId);
+
+  const coord = new Coordinator(runDir, makeRunner());
+  if (coord.state.phase !== Phase.IMPLEMENTING) {
+    process.stderr.write(
+      `错误: 当前 phase=${coord.state.phase}, 必须 IMPLEMENTING 才能 dispatch\n`,
+    );
+    return 2;
+  }
+  const packets = coord.dispatchReadyTasks();
+
+  const allComplete =
+    coord.plan !== null &&
+    coord.plan.tasks.length > 0 &&
+    coord.plan.tasks.every((t) => t.status === "complete");
+
+  // stdout 一行 JSON (主 agent 易解析; 人类可读也够用)
+  const summary = {
+    run_id: runId,
+    phase: coord.state.phase,
+    human_pending: coord.state.human_pending,
+    packets,
+    all_complete: allComplete,
+  };
+  process.stdout.write(`${JSON.stringify(summary)}\n`);
+  return 0;
+}
+
+/**
+ * collect-outcome 子命令: 收回单个 task 的 outcome, 跑校验, 推进状态。
+ *
+ * 用法: e2e-loop collect-outcome <run_id> --task <id> [--runs-root <dir>]
+ *
+ * stdout (JSON 行): 完整 CollectCliResult。
+ *
+ * 主 agent 据 verified / reason / failures / max_retries_exceeded 决定下一步。
+ */
+export function runCollectOutcome(args: Args): number {
+  const runId = positional(args, 0);
+  if (!runId) {
+    process.stderr.write("错误: collect-outcome 需要位置参数 <run_id>\n");
+    return 2;
+  }
+  const taskId = args.values.task;
+  if (!taskId) {
+    process.stderr.write("错误: collect-outcome 需要 --task <id>\n");
+    return 2;
+  }
+
+  const runsRoot = resolveRunsRoot(args);
+  const runDir = resolveRunDir(runsRoot, runId);
+
+  const coord = new Coordinator(runDir, makeRunner());
+  if (coord.state.phase !== Phase.IMPLEMENTING) {
+    process.stderr.write(
+      `错误: 当前 phase=${coord.state.phase}, 必须 IMPLEMENTING 才能 collect-outcome\n`,
+    );
+    return 2;
+  }
+
+  const result: CollectCliResult = coord.collectTaskOutcome(taskId);
+  process.stdout.write(`${JSON.stringify(result)}\n`);
   return 0;
 }

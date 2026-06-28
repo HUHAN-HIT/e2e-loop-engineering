@@ -28,6 +28,10 @@ export function printHelp(stream: NodeJS.WriteStream = process.stdout): void {
   abort            任意 phase → ABORTED (必须给 --reason)
   amend            处理 plan-amendment (回滚触及 AC 的 task, 回 PLANNING)
 
+真实 run 命令 (主 agent 当 coordinator, 触发 Task 工具派 implementation-worker):
+  dispatch         IMPLEMENTING 阶段选 ready task, 标 running, 输出 packets JSON
+  collect-outcome  收回单个 task 的 outcome, 校验, 推进状态 / 留 running 给 fix
+
 通用选项:
   --help, -h            显示本帮助
   --runs-root <dir>     dry-run 命令的 runs 根目录 (缺省: ./runs)
@@ -61,6 +65,14 @@ dry-run 命令选项:
   signoff-wrap-up   <run_id> [--reject]
   abort       <run_id> --reason <text>
   amend       <run_id> --reason <text> --ac <AC_ID> [--ac <AC_ID> ...]
+  (以上命令均接受 --runs-root <dir>)
+
+真实 run 命令选项:
+  dispatch         <run_id>
+                  → stdout: JSON {run_id, phase, packets: [...], all_complete}
+  collect-outcome  <run_id> --task <id>
+                  → stdout: JSON {task_id, verified, reason, failures, advanced_to,
+                                   all_complete, attempt, max_retries_exceeded, ...}
   (以上命令均接受 --runs-root <dir>)
 
 示例:

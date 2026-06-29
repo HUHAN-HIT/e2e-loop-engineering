@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { z } from "zod";
+import { atomicReplace } from "../runtime/directory.js";
 
 export const WORKTREE_BINDING_SCHEMA = "loop-engineering.worktree-binding.v1";
 export const WORKTREE_BINDING_OWNER = "loop-engineering";
@@ -78,7 +79,10 @@ export function writeWorktreeBinding(filePath: string, binding: WorktreeBinding)
   );
   try {
     fs.writeFileSync(tmpPath, `${JSON.stringify(validated, null, 2)}\n`, "utf-8");
-    fs.renameSync(tmpPath, filePath);
+    // 与 writeRunState/writeTaskPlan 一致: 走 atomicReplace 防 Windows 杀软锁竞态
+    // (复刻 Python `_atomic_replace`: 重试 5 次, 退避 25ms)。裸 renameSync 在杀软扫描下
+    // 偶发 EPERM/EBUSY, worktree-binding.json 半写会让 run 处于不一致状态。
+    atomicReplace(tmpPath, filePath);
   } catch (err) {
     try {
       fs.unlinkSync(tmpPath);

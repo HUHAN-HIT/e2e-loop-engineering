@@ -275,7 +275,7 @@ test("install: settings.json 深合并 — 保留用户配置且并入 4 个 hoo
 // ---------------------------------------------------------------------------
 // 用例 6: uninstall — 清掉本工具痕迹, removedFiles 合理
 // ---------------------------------------------------------------------------
-test("uninstall: 清掉 skills/agents×4/hooks/settings 痕迹", async () => {
+test("uninstall: 清掉 skills/agents×4/hooks + settings 内本工具 hooks 条目", async () => {
   const projectDir = makeTmpProject();
   try {
     await claudeCodeAdapter.install({ projectDir, force: false });
@@ -296,8 +296,16 @@ test("uninstall: 清掉 skills/agents×4/hooks/settings 痕迹", async () => {
     for (const f of AGENT_FILES) {
       expect(fs.existsSync(path.join(claude, "agents", f))).toBe(false);
     }
-    // settings.json 被删
-    expect(fs.existsSync(path.join(claude, "settings.json"))).toBe(false);
+    // settings.json 文件仍存在 (H1 修复: 不再整文件删, 改为只 strip 本工具注入的 hooks)
+    expect(fs.existsSync(path.join(claude, "settings.json"))).toBe(true);
+    // settings.json 内本工具注入的 hooks 已被清掉 (空了)
+    const after = readSettings(projectDir);
+    const cmds = allHookCommands(after);
+    for (const n of HOOK_NAMES) {
+      expect(cmds).not.toContain(
+        `node .claude/hooks/loop_engineering/${n}.mjs`,
+      );
+    }
 
     // removedFiles 合理: 含本工具关键痕迹
     expect(result.removedFiles).toContain(".claude/skills/loop-engineering/");
@@ -306,6 +314,91 @@ test("uninstall: 清掉 skills/agents×4/hooks/settings 痕迹", async () => {
     for (const f of AGENT_FILES) {
       expect(result.removedFiles).toContain(`.claude/agents/${f}`);
     }
+  } finally {
+    cleanup(projectDir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 用例 6b: uninstall settings.json — 保留用户自定义 hook 配置 (H1 对称性)
+//          (install 用 mergeHooks 保留用户配置; uninstall 用 stripLoopEngineeringHooks
+//           只删本工具注入的条目, 与 install 对称)
+// ---------------------------------------------------------------------------
+test("uninstall: settings.json 保留用户自定义 hook 配置 (与 install mergeHooks 对称)", async () => {
+  const projectDir = makeTmpProject();
+  try {
+    const claude = path.join(projectDir, ".claude");
+    fs.mkdirSync(claude, { recursive: true });
+    // 预置用户自己的 settings.json (有用户自定义 hook + permissions)
+    const userSettings = {
+      permissions: { allow: ["Bash(ls:*)"] },
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: "Read",
+            hooks: [{ type: "command", command: "echo user-hook" }],
+          },
+        ],
+      },
+    };
+    fs.writeFileSync(
+      path.join(claude, "settings.json"),
+      JSON.stringify(userSettings),
+      "utf-8",
+    );
+
+    await claudeCodeAdapter.install({ projectDir, force: false });
+    // install 后: 用户 hook + 本工具 4 hook 共存
+    const before = readSettings(projectDir);
+    const cmdsBefore = allHookCommands(before);
+    expect(cmdsBefore).toContain("echo user-hook");
+    for (const n of HOOK_NAMES) {
+      expect(cmdsBefore).toContain(
+        `node .claude/hooks/loop_engineering/${n}.mjs`,
+      );
+    }
+
+    await claudeCodeAdapter.uninstall!(projectDir);
+
+    // uninstall 后: 本工具 hooks 全部清除, 用户 hook 与 permissions 必须保留
+    const after = readSettings(projectDir);
+    expect((after.permissions as Record<string, unknown>).allow).toEqual([
+      "Bash(ls:*)",
+    ]);
+    const cmdsAfter = allHookCommands(after);
+    expect(cmdsAfter).toContain("echo user-hook");
+    for (const n of HOOK_NAMES) {
+      expect(cmdsAfter).not.toContain(
+        `node .claude/hooks/loop_engineering/${n}.mjs`,
+      );
+    }
+  } finally {
+    cleanup(projectDir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 用例 6c: uninstall settings.json — 用户文件不可解析时不动 (尊重用户文件)
+// ---------------------------------------------------------------------------
+test("uninstall: settings.json 不可解析时保留原文件 (不抹除用户配置)", async () => {
+  const projectDir = makeTmpProject();
+  try {
+    await claudeCodeAdapter.install({ projectDir, force: false });
+    const claude = path.join(projectDir, ".claude");
+
+    // 故意把 settings.json 改成含 JSON5 注释的不可解析内容
+    const broken = "{\n  // JSON5 注释, 标准 JSON.parse 会失败\n  hooks: {}\n}";
+    fs.writeFileSync(path.join(claude, "settings.json"), broken, "utf-8");
+
+    const result = await claudeCodeAdapter.uninstall!(projectDir);
+
+    // 文件原样保留 (uninstall 不动不可解析的用户文件)
+    expect(fs.readFileSync(path.join(claude, "settings.json"), "utf-8")).toBe(
+      broken,
+    );
+    // 标 notFound 表示"未处理" (避免假装成功)
+    expect(result.notFoundFiles).toContain(".claude/settings.json");
+    expect(result.removedFiles).not.toContain(".claude/settings.json");
   } finally {
     cleanup(projectDir);
   }

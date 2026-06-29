@@ -357,8 +357,13 @@ test("plan-agent + design.md + task-plan.yaml 齐全 → defer, verified=true", 
   expect(out.decision).toBe("defer");
   expect(out.context!.verified).toBe(true);
   expect(out.context!.worker).toBe("plan-agent");
-  // P1 占位: plan_check_all_pass=true (artifact 落盘即视为通过; 见简报)
-  expect(out.context!.plan_check_all_pass).toBe(true);
+  // 诚实标注 (SKILL §2 信条 5): hook 不跑 plan_check, 由 Coordinator.submitPlan 跑;
+  // 不能注入 plan_check_all_pass=true 误导主 agent。
+  expect(out.context!.plan_check_ran_by).toBe("coordinator");
+  expect(out.context!.plan_check_failures_path).toBe(
+    "planning/plan-check-failures.json",
+  );
+  expect(out.context!.plan_check_all_pass).toBeUndefined();
 });
 
 // ---------------------------------------------------------------------------

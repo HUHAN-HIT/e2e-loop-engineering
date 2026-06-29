@@ -29,6 +29,12 @@
  * fail-safe: 所有 hook 包 safeRun, 内部错误退化放行; 唯一例外是 guard_paths 的有意 deny —— 它
  * 在 safeRun 之外单独 throw, 才能真正拦截工具 (safeRun 不会误吞)。
  *
+ * 与 adapter-cc 的差异 (M6 设计选择):
+ *   - CC 端 runBinding 的 fail-safe 按 hook 区分 (probe=allow, 其它三=deny), 见 adapter-cc/src/runtime.ts。
+ *   - OC 端 safeRun 统一放行, 因为 OC 的 guard_paths 业务异常由 logic.ts 自身 try/catch + 决策;
+ *     safeRun 兜底的多是"读 run-state / task-plan 失败"等基础设施异常, 此时 throw 会拦截用户
+ *     正常 Write/Edit, 体验代价大于安全收益。OC 的 after/event 阶段本就拦不住, fail-safe=deny 无意义。
+ *
  * @opencode-ai/plugin 仅类型, 本文件不 import 它 (用 runtime.ts 自写的最小类型), bundle 后零运行时依赖。
  */
 

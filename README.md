@@ -108,6 +108,21 @@ npx tsc --noEmit              # 类型检查
 
 ---
 
+## 已知差异: OpenCode (OC) 下 guard_anchors 仅劝告
+
+跨宿主一致性原则 (设计 §5.2): 同一份 hook 判断核心 `packages/shared/src/hooks/guard_anchors/logic.ts` 决定 allow / deny, 但**宿主能否真正阻断 Stop** 取决于宿主自身能力:
+
+| 宿主 | Stop 等价事件 | deny 后行为 |
+| --- | --- | --- |
+| Claude Code | `Stop` hook | **硬阻断**: 主 agent 该回合被 deny 不能结束 (decision=block, exit code 2) |
+| OpenCode | `session.idle` event | **仅劝告**: OC event 是非阻断通知, deny 只能写一条 advise 消息提示主 agent (已知差异 R9) |
+
+**含义 (使用者须知):** OC 下若 coordinator 自检失败, 主 agent 仍可能在忽视劝告的情况下结束回合。这是 OpenCode 当前 plugin API 的能力上限, 不是本工具 bug。建议在 OC 下配合人工盯点 (人工检查 `runs/<id>/wrap-up/check-result.json` 与 `planning/plan-check-failures.json`), 不要只依赖 hook 自动兜底。CC 下无此问题。
+
+实现位置: `packages/adapter-oc/src/plugin/index.ts` (`handleGuardAnchorsOnIdle` + `advise`)、`packages/adapter-oc/src/plugin/runtime.ts:155`。
+
+---
+
 ## 迁移状态
 
 源自设计 §11 路线图。`ssot-ts` 为唯一算法 SSOT; 原 Python `loop_engineering/` 包已于 2026-06-28 (用户决策) 物理移除, TS 等价测试守护行为对齐。

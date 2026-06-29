@@ -277,12 +277,17 @@ function handlePlan(runDir: string): HandleResult {
   // 由 Coordinator.submitPlan 跑, 结果落 planning/plan-check-failures.json;
   // guard_anchors 在 PLANNING 阶段读该结果文件做 Stop 门禁。
   // 本 hook 不重跑 plan_check (避免循环依赖 + 避免与 Coordinator 双写结果)。
+  //
+  // 诚实标注 (SKILL §2 信条 5 "诚实高于合规外观"): hook 不跑 plan_check, 就不能注入
+  // plan_check_all_pass=true —— 否则主 agent 见字段名会误以为 hook 验证过。改注入
+  // plan_check_ran_by + plan_check_failures_path, 明确告诉主 agent 真值来源。
   return {
     output: injectContext({
       verified: true,
       worker: WORKER_PLAN,
       artifacts,
-      plan_check_all_pass: true, // hook 不评判; 真值由 Coordinator.submitPlan 跑出后落 plan-check-failures.json
+      plan_check_ran_by: "coordinator", // hook 不评判; 真值由 Coordinator.submitPlan 跑出后落 plan-check-failures.json
+      plan_check_failures_path: "planning/plan-check-failures.json",
       warnings: [],
       note: "plan_check 由 Coordinator.submitPlan 跑 (非 hook); 失败项见 planning/plan-check-failures.json",
     }),

@@ -125,12 +125,18 @@ export function emitStdout(obj: Record<string, unknown> | null): void {
 /**
  * binding 主入口的标准调度:
  *   读 stdin → 调 buildInput(得到 HookInput) → handle → 翻译输出 → emit stdout
- *   异常一律退化放行 (emit 空 + stderr 提示)。
+ *   异常按 failSafe 策略处置。
+ *
+ * failSafe (与各 hook logic.ts 头部声明对齐, 跨宿主一致性设计 §5.2):
+ *   - "allow": 退化放行 (emit 空 + stderr 提示)。仅 probe_and_gate 用, 不锁死会话启动。
+ *   - "deny":  emit block + reason。guard_paths / post_task_collect / guard_anchors 用,
+ *             防糊弄护栏在 binding 层异常时也不能放过 (Python `main` except 分支语义)。
  */
 export async function runBinding(
   payload: CCPayload,
   buildInput: (p: CCPayload) => HookInput,
   handle: (input: HookInput) => Promise<HookOutput>,
+  failSafe: "allow" | "deny" = "allow",
 ): Promise<void> {
   try {
     const input = buildInput(payload);
@@ -140,14 +146,23 @@ export async function runBinding(
     }
     emitStdout(hookOutputToCCStdout(out));
   } catch (e) {
-    // CC hook fail-safe: 不锁死会话
+    const msg = e instanceof Error ? e.message : String(e);
     try {
       process.stderr.write(
-        `[loop-engineering hook] 内部错误, 退化放行: ${e instanceof Error ? e.message : String(e)}\n`,
+        failSafe === "deny"
+          ? `[loop-engineering hook] 内部错误, fail-safe=deny (block): ${msg}\n`
+          : `[loop-engineering hook] 内部错误, 退化放行: ${msg}\n`,
       );
     } catch {
       /* noop */
     }
-    emitStdout(null);
+    if (failSafe === "deny") {
+      emitStdout({
+        decision: "block",
+        reason: `loop-engineering hook 内部错误 (fail-safe=deny): ${msg}`,
+      });
+    } else {
+      emitStdout(null);
+    }
   }
 }

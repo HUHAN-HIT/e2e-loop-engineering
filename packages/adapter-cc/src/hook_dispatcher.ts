@@ -89,6 +89,20 @@ function handlerFor(
   }
 }
 
+/**
+ * 各 hook 的 fail-safe 策略 (与 shared/src/hooks 下各 logic.ts 头部声明对齐)。
+ *
+ * probe_and_gate: 退化放行 - 不锁死 SessionStart, 让用户能进会话修复问题。
+ * guard_paths / post_task_collect / guard_anchors: fail-safe=deny - 防糊弄护栏
+ *   在 binding 层异常时也不能放过 (Python main except 分支语义, 设计 §0.2 / §0.4)。
+ */
+const FAIL_SAFE: Record<HookName, "allow" | "deny"> = {
+  probe_and_gate: "allow",
+  guard_paths: "deny",
+  post_task_collect: "deny",
+  guard_anchors: "deny",
+};
+
 export async function runClaudeHook(rawName: string | undefined): Promise<number> {
   const name = normalizeCliHookName(rawName);
   if (!name) {
@@ -97,6 +111,6 @@ export async function runClaudeHook(rawName: string | undefined): Promise<number
   }
   const payload = parseStdin(readStdin());
   const input = buildInput(name, payload);
-  await runBinding(payload, () => input, handlerFor(name));
+  await runBinding(payload, () => input, handlerFor(name), FAIL_SAFE[name]);
   return 0;
 }

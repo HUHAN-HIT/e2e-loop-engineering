@@ -174,21 +174,21 @@ dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**
 
 ### 阶段 3 补充 · CLI 分发模式(真实 run, 非 dryrun)
 
-上面描述的是"角色应做什么"。本节给出 **coordinator 端用 CLI 把 packet 推到磁盘、再用 Task 工具派子 agent** 的具体循环。**真实 run 不要用 `loop-eng run <run_id>`** —— 那是 dryrun 档,worker 是 echo 占位,不会真改代码。真实分发用 `dispatch` + `collect-outcome` 两步循环 (设计 §3.7 单 tick 顺序, §0.4 artifact-first)。
+上面描述的是"角色应做什么"。本节给出 **coordinator 端用 CLI 把 packet 推到磁盘、再用 Task 工具派子 agent** 的具体循环。**真实 run 不要用 `e2e-loop run <run_id>`** —— 那是 dryrun 档,worker 是 echo 占位,不会真改代码。真实分发用 `dispatch` + `collect-outcome` 两步循环 (设计 §3.7 单 tick 顺序, §0.4 artifact-first)。
 
 **分发循环(每个 tick 重复到 `all_complete=true`):**
 
-1. **dispatch:** 跑 `loop-eng dispatch <run_id>` → 输出 ready packets 的 JSON 数组(每个含 `task_id` / `attempt` / `allowed_write_paths` / packet body)。`dispatch` 时该 task 的 `attempt` **自动递增**,task 翻 `running` 并落 `tasks/<tid>/dispatch.json`(Coordinator 单写者)。
+1. **dispatch:** 跑 `e2e-loop dispatch <run_id>` → 输出 ready packets 的 JSON 数组(每个含 `task_id` / `attempt` / `allowed_write_paths` / packet body)。`dispatch` 时该 task 的 `attempt` **自动递增**,task 翻 `running` 并落 `tasks/<tid>/dispatch.json`(Coordinator 单写者)。
 2. **派子 agent:** 对每个 packet,用 **Task 工具**(`subagent_type=implementation-worker`)派 implementation-worker 子 agent,首条消息把 packet body 整块发过去。子 agent 在隔离上下文里跑测试→实现→产 artifact。
-3. **collect-outcome:** 子 agent 返回后,跑 `loop-eng collect-outcome <run_id> --task <tid>`。它独立重算 `actual_writes`(git diff > fs snapshot > 自报告)、跑任务自检、把结果写到 `tasks/<tid>/collect-outcome.json` 与 `tasks/<tid>/actual-writes.json`、按结果置 task `complete` 或留 `running`(Coordinator 单写者)。
+3. **collect-outcome:** 子 agent 返回后,跑 `e2e-loop collect-outcome <run_id> --task <tid>`。它独立重算 `actual_writes`(git diff > fs snapshot > 自报告)、跑任务自检、把结果写到 `tasks/<tid>/collect-outcome.json` 与 `tasks/<tid>/actual-writes.json`、按结果置 task `complete` 或留 `running`(Coordinator 单写者)。
 4. 通过 → 回第 1 步拿下一批 ready packet;`all_complete=true` → 进 WRAPPING_UP。
 
 **fix-once 流程(collect-outcome 失败时):**
 
 1. 读 `runs/<id>/tasks/<tid>/collect-failures.json` 拿失败详情,按 `reason` 分流:
-   - `plan_amendment` → **不派 fix 子 agent**,跑 `loop-eng amend <run_id> ...` 走计划修正快路径(见上文)。
+   - `plan_amendment` → **不派 fix 子 agent**,跑 `e2e-loop amend <run_id> ...` 走计划修正快路径(见上文)。
    - `task_check_fail` / `failed` / `oob`(越界写)→ 派 implementation-worker 子 agent,prompt = 原 packet + failures 详情(哪个 case 红、哪个路径越界、缺哪个 artifact),子 agent 修复后**重写**自己的 artifact。
-2. 子 agent 修完返回后,**主 agent 再跑 `loop-eng dispatch <run_id>`**(同 task 重派发,`attempt` 自动递增),再跑 `collect-outcome` 校验。
+2. 子 agent 修完返回后,**主 agent 再跑 `e2e-loop dispatch <run_id>`**(同 task 重派发,`attempt` 自动递增),再跑 `collect-outcome` 校验。
 3. 输出 `max_retries_exceeded=true` 时 → 主 agent 决定:回退到人接(`human_pending`)还是 `abort`(给 reason)。**不要无限重试。**
 
 **attempt 语义(关键):** `dispatch` 时递增、`collect-outcome` 失败时**不**递增(只把 task 留在 `running` 等下一次 dispatch)。这保证一次 worker 会话 = 一个 attempt 号,attempt 不因校验失败白白累加。

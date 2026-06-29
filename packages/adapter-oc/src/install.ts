@@ -261,6 +261,28 @@ function copyOne(
   return "written";
 }
 
+/**
+ * 备份用户不可解析的 opencode.json (force=true 覆盖前的保护)。
+ *
+ * 命名: opencode.json.loop-engineering.bak (与原文件同目录, 用户可肉眼看到并手动恢复)。
+ * 失败不抛 (备份是 best-effort 保护), 仅 stderr 提示。
+ */
+function backupUnparseableConfig(dst: string): void {
+  try {
+    const bak = `${dst}.loop-engineering.bak`;
+    fs.copyFileSync(dst, bak);
+    process.stderr.write(
+      `[loop-engineering] 用户 opencode.json 不可解析, 已备份至 ${bak} 后覆盖。\n`,
+    );
+  } catch (e) {
+    process.stderr.write(
+      `[loop-engineering] opencode.json 备份失败 (best-effort 跳过): ${
+        e instanceof Error ? e.message : String(e)
+      }\n`,
+    );
+  }
+}
+
 /** 渲染并写出单个 OpenCode agent (frontmatter 转换; force=false 时已存在则跳过)。 */
 function writeAgent(
   src: string,
@@ -293,8 +315,9 @@ function installConfig(dst: string, force: boolean): "written" | "skipped" {
   try {
     existing = JSON.parse(fs.readFileSync(dst, "utf-8"));
   } catch {
-    // 不可解析: force 覆盖, 否则跳过 (不破坏用户文件)
+    // 不可解析: force 覆盖前先备份 (避免破坏用户原始配置), 否则跳过
     if (force) {
+      backupUnparseableConfig(dst);
       fs.writeFileSync(dst, JSON.stringify(fallback, null, 2) + "\n", "utf-8");
       return "written";
     }
@@ -303,6 +326,7 @@ function installConfig(dst: string, force: boolean): "written" | "skipped" {
 
   if (typeof existing !== "object" || existing === null || Array.isArray(existing)) {
     if (force) {
+      backupUnparseableConfig(dst);
       fs.writeFileSync(dst, JSON.stringify(fallback, null, 2) + "\n", "utf-8");
       return "written";
     }

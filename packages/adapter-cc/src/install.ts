@@ -327,8 +327,10 @@ function installSettings(
   try {
     existing = JSON.parse(fs.readFileSync(dst, "utf-8"));
   } catch {
-    // 用户 settings 不可解析: force 覆盖, 否则跳过 (不破坏用户文件)
+    // 用户 settings 不可解析 (如 JSON5 注释 / 手写残缺): force 覆盖前先备份, 避免破坏用户原始配置。
+    // 备份命名: settings.json.loop-engineering.bak (与原文件同目录, 用户可肉眼看到并手动恢复)。
     if (force) {
+      backupUnparseableSettings(dst);
       fs.writeFileSync(
         dst,
         JSON.stringify(incoming, null, 2) + "\n",
@@ -340,6 +342,7 @@ function installSettings(
   }
   if (typeof existing !== "object" || existing === null) {
     if (force) {
+      backupUnparseableSettings(dst);
       fs.writeFileSync(
         dst,
         JSON.stringify(incoming, null, 2) + "\n",
@@ -356,6 +359,28 @@ function installSettings(
   if (JSON.stringify(merged) === JSON.stringify(existing)) return "skipped";
   fs.writeFileSync(dst, JSON.stringify(merged, null, 2) + "\n", "utf-8");
   return "written";
+}
+
+/**
+ * 备份用户不可解析的 settings.json (force=true 覆盖前的保护)。
+ *
+ * 命名: settings.json.loop-engineering.bak (与原文件同目录, 用户可肉眼看到并手动恢复)。
+ * 失败不抛 (备份是 best-effort 保护, 不应阻塞主流程), 仅 stderr 提示。
+ */
+function backupUnparseableSettings(dst: string): void {
+  try {
+    const bak = `${dst}.loop-engineering.bak`;
+    fs.copyFileSync(dst, bak);
+    process.stderr.write(
+      `[loop-engineering] 用户 settings.json 不可解析, 已备份至 ${bak} 后覆盖。\n`,
+    );
+  } catch (e) {
+    process.stderr.write(
+      `[loop-engineering] settings.json 备份失败 (best-effort 跳过): ${
+        e instanceof Error ? e.message : String(e)
+      }\n`,
+    );
+  }
 }
 
 /** 把 incoming.hooks 深合并进 existing, 同 command 不重复追加 (幂等)。 */
@@ -451,7 +476,7 @@ async function install(ctx: InstallContext): Promise<InstallResult> {
 /**
  * uninstall: 只删本工具装的, 不动用户其它 .claude/ 文件。
  * 删: skills/loop-engineering/、agents/<4 files>.md、hooks/loop_engineering/、
- * settings.json (整文件; 用户若有其它 hook 配置需手工保留)。
+ * settings.json 中本工具注入的 hooks 条目 (保留用户其它配置; 与 install 的 mergeHooks 对称)。
  */
 async function uninstall(projectDir: string): Promise<UninstallResult> {
   const root = path.resolve(projectDir);
@@ -503,19 +528,67 @@ async function uninstall(projectDir: string): Promise<UninstallResult> {
     ".claude/hooks/loop_engineering/",
   );
 
-  // 4. settings.json: 整文件删 (Python claude_assets.py 当前不删 settings.json,
-  // 但 uninstall 语义是"清掉本工具痕迹"; 用户其它配置需手工保留——这与 settings.json
-  // 由本工具管理的事实一致)。
+  // 4. settings.json: 只删本工具注入的 hooks 条目 (与 install 的 mergeHooks 对称),
+  // 保留用户其它配置 (其它 hooks / permissions / env 等)。文件解析失败/非 object 时
+  // **不动用户文件** (避免破坏非标 JSON5/注释配置)。
   const settingsAbs = path.join(root, ".claude/settings.json");
-  if (fs.existsSync(settingsAbs)) {
-    try {
-      fs.rmSync(settingsAbs, { force: true });
-      removedFiles.push(".claude/settings.json");
-    } catch {
-      notFoundFiles.push(".claude/settings.json");
-    }
-  } else {
+  if (!fs.existsSync(settingsAbs)) {
     notFoundFiles.push(".claude/settings.json");
+  } else {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fs.readFileSync(settingsAbs, "utf-8"));
+    } catch {
+      // 用户 settings.json 不可解析 (例如含注释/JSON5): 不动文件, 仅标 notFound
+      // (避免覆盖抹掉用户原始配置)。
+      notFoundFiles.push(".claude/settings.json");
+      parsed = undefined;
+    }
+    if (parsed !== undefined) {
+      if (typeof parsed !== "object" || parsed === null) {
+        // 顶层非 object: 不是合法 settings, 不动。
+        notFoundFiles.push(".claude/settings.json");
+      } else {
+        const obj = parsed as Record<string, unknown>;
+        // obj.hooks 形状: { <EventName>: Array<Group> } (与 mergeHooks 一致)。
+        // stripLoopEngineeringHooks 接受单个 event 的 groups 数组, 故按 event 遍历,
+        // 不再误把整个 obj.hooks 对象当成数组传入 (会丢用户配置)。
+        const next: Record<string, unknown> = { ...obj };
+        if (
+          typeof obj.hooks === "object" &&
+          obj.hooks !== null &&
+          !Array.isArray(obj.hooks)
+        ) {
+          const hooksObj = obj.hooks as Record<string, unknown>;
+          const newHooks: Record<string, unknown> = {};
+          let anyKept = false;
+          for (const [event, groups] of Object.entries(hooksObj)) {
+            const kept = stripLoopEngineeringHooks(groups);
+            if (kept.length > 0) {
+              newHooks[event] = kept;
+              anyKept = true;
+            }
+          }
+          if (anyKept) {
+            next.hooks = newHooks;
+          } else {
+            delete next.hooks;
+          }
+        } else {
+          delete next.hooks;
+        }
+        try {
+          fs.writeFileSync(
+            settingsAbs,
+            JSON.stringify(next, null, 2) + "\n",
+            "utf-8",
+          );
+          removedFiles.push(".claude/settings.json");
+        } catch {
+          notFoundFiles.push(".claude/settings.json");
+        }
+      }
+    }
   }
 
   return { removedFiles, notFoundFiles };

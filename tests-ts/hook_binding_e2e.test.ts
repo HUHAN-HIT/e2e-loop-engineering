@@ -92,7 +92,7 @@ beforeAll(() => {
       throw new Error(`install 未正确落 hook: ${f}`);
     }
   }
-});
+}, 30000);
 
 afterAll(() => {
   if (SANDBOX) {

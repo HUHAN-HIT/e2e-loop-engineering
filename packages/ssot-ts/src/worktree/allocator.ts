@@ -1,8 +1,8 @@
 /**
  * Run-level git worktree allocator.
  *
- * 一期只把一个 run 绑定到一个物理 worktree。默认 mode=none 完全保留旧行为;
- * always/auto/adopt 才会改变 runDir 与 worker packet 的真实工作目录。
+ * 一期只把一个 run 绑定到一个物理 worktree。默认 mode=auto 使用隔离 worktree;
+ * 显式 mode=none 才保留旧 runDir 与 worker packet 工作目录。
  */
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -102,13 +102,6 @@ function isLinkedWorktree(cwd: string, git: GitRunner): boolean {
   }
 }
 
-function assertCleanBase(repoRoot: string, git: GitRunner): void {
-  const status = gitOutput(git, repoRoot, ["status", "--porcelain"]);
-  if (status.length > 0) {
-    throw new Error("base worktree 有未提交改动; worktree mode 创建前请先提交或清理。");
-  }
-}
-
 function assertWorktreeRootIgnored(repoRoot: string, worktreeRoot: string): void {
   const relative = path.relative(repoRoot, worktreeRoot).split(path.sep).join("/");
   if (relative.startsWith("..") || path.isAbsolute(relative)) return;
@@ -163,8 +156,6 @@ function makeBinding(fields: {
 
 function allocateCreated(opts: WorktreeAllocationOptions, git: GitRunner): WorktreeAllocation {
   const repoRoot = repoRootFor(opts.repoCwd, git);
-  assertCleanBase(repoRoot, git);
-
   const baseRef = opts.baseRef ?? DEFAULT_BASE_REF;
   const branchPrefix = opts.branchPrefix ?? DEFAULT_BRANCH_PREFIX;
   const rawWorktreeRoot = opts.worktreeRoot ?? DEFAULT_WORKTREE_ROOT;

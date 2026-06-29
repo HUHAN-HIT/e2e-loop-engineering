@@ -1,6 +1,12 @@
 {
   "name": "@e2e-loop/cli",
   "version": "1.0.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HUHAN-HIT/e2e-loop-engineering.git",
+    "directory": "packages/cli"
+  },
   "type": "module",
   "bin": {
     "e2e-loop": "dist/index.js"
@@ -13,14 +19,14 @@
   ],
   "description": "e2e-loop CLI 入口包；P1 阶段实现 install/uninstall/list 命令。",
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/copy-install-assets.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@e2e-loop/shared": "*",
-    "@e2e-loop/adapter-claude-code": "*",
-    "@e2e-loop/adapter-opencode": "*",
-    "@e2e-loop/ssot": "*"
+    "@e2e-loop/shared": "^1.0.0",
+    "@e2e-loop/adapter-claude-code": "^1.0.0",
+    "@e2e-loop/adapter-opencode": "^1.0.0",
+    "@e2e-loop/ssot": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

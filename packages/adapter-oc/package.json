@@ -1,6 +1,12 @@
 {
   "name": "@e2e-loop/adapter-opencode",
   "version": "1.0.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HUHAN-HIT/e2e-loop-engineering.git",
+    "directory": "packages/adapter-oc"
+  },
   "type": "module",
   "main": "./dist/index.mjs",
   "types": "./src/index.ts",
@@ -22,7 +28,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@e2e-loop/shared": "*",
+    "@e2e-loop/shared": "^1.0.0",
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {

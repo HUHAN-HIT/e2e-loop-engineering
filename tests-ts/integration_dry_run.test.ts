@@ -330,7 +330,7 @@ const SMOKE = path.join(REPO_ROOT, "tests-ts", "fixtures", "smoke");
 beforeAll(() => {
   // 确保 cli/dist 是最新产物 (含 P5-M7B dry-run 子命令 + zod bundle)。
   execSync("npm run build", { cwd: REPO_ROOT, stdio: "pipe" });
-});
+}, 30000);
 
 test("[CLI 入口端到端] node 跑 dist/index.js: init→plan→signoff-plan→run, 产物落盘 + phase 迁移", () => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "loop-cli-e2e-"));
@@ -347,7 +347,7 @@ test("[CLI 入口端到端] node 跑 dist/index.js: init→plan→signoff-plan�
       });
 
     // init → CREATED, 解析 run_id
-    const initOut = run("init", reqPath);
+    const initOut = run("init", reqPath, "--worktree-mode", "none");
     const m = initOut.match(/created run: (\d{8}-\d{3})/);
     expect(m).not.toBeNull();
     const runId = m![1]!;

@@ -26,7 +26,7 @@ const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 
 beforeAll(() => {
   execSync("npm run build", { cwd: REPO_ROOT, stdio: "pipe" });
-});
+}, 30000);
 
 function runCliHook(
   hookName: string,

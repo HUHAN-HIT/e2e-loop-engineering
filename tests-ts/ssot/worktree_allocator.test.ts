@@ -85,6 +85,31 @@ test("[worktree allocator] mode none keeps legacy runs root and does not create 
   expect(allocation.binding).toBeNull();
 });
 
+test("[worktree allocator] auto creates an isolated worktree even when the base worktree is dirty", () => {
+  const repo = makeTmp();
+  fs.writeFileSync(path.join(repo, ".gitignore"), ".worktrees/\n", "utf-8");
+  const { runner, calls } = makeGitRunner({
+    "rev-parse --show-toplevel": repo,
+    "status --porcelain": " M README.md",
+  });
+
+  const allocation = allocateRunWorktree({
+    mode: "auto",
+    repoCwd: repo,
+    runId: "20260628-005",
+    requirementSlug: "dirty base",
+    git: runner,
+  });
+
+  expect(allocation.binding?.mode).toBe("created");
+  expect(allocation.workdir).toBe(path.join(repo, ".worktrees", "20260628-005"));
+  expect(
+    calls.some((c) =>
+      c.args.join(" ") ===
+      `worktree add ${allocation.workdir} -b loop/20260628-005-dirty-base HEAD`,
+    ),
+  ).toBe(true);
+});
 test("[worktree allocator] always refuses default .worktrees when it is not ignored", () => {
   const repo = makeTmp();
   fs.writeFileSync(path.join(repo, ".gitignore"), "dist/\n", "utf-8");

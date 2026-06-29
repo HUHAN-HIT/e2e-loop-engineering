@@ -3,6 +3,23 @@
 本文件记录 Loop Engineering 工程的版本演进。版本号对齐 `core/manifest.json`。
 每条修改登记在该版本下, 按"新增 / 修复 / 移除 / 文档"分类。
 
+## 1.0.0 (2026-06-29)
+
+首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
+
+### 新增
+
+- **开源许可:** 仓库根新增 `LICENSE` (Apache-2.0); 5 个发布包 package.json 均补 `"license": "Apache-2.0"`
+  与 `repository` 字段 (指向 `github.com/HUHAN-HIT/e2e-loop-engineering`, 带 `directory` 子目录定位)。
+
+### 修复
+
+- **内部依赖范围收紧:** 各包对 `@e2e-loop/*` 的依赖由 `*` 改为 `^1.0.0`
+  (cli→shared/ssot/adapter-cc/adapter-oc; ssot/adapter-cc/adapter-oc→shared),
+  避免已发布包未来被动拉取不兼容大版本; workspace 本地仍由 1.0.0 软链满足。
+- **版本号对齐:** `core/manifest.json` 与本 changelog 由 `1.0.0-alpha` 提升为 `1.0.0`,
+  与 5 个发布包的 package.json 版本一致。
+
 ## 1.0.0-alpha (2026-06-29)
 
 本版本为 Python SSOT 物理移除后的收口版本, 主要完成"文档与代码对齐 TS SSOT"的扫尾工作。

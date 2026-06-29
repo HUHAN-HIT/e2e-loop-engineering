@@ -50,7 +50,7 @@ const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 beforeAll(() => {
   // 确保 cli/dist 是最新产物 (含 dispatch / collect-outcome 子命令)。
   execSync("npm run build", { cwd: REPO_ROOT, stdio: "pipe" });
-});
+}, 30000);
 
 /**
  * 把 fixture task-plan.yaml 中的 case id 改写为指定值 (默认 T01-CASE-001)。
@@ -118,7 +118,7 @@ test("[CLI 端到端] dispatch→collect-outcome 闭环: 单 task 通过 → 自
       });
 
     // 1. init → CREATED
-    const initOut = run("init", reqPath);
+    const initOut = run("init", reqPath, "--worktree-mode", "none");
     const m = initOut.match(/created run: (\d{8}-\d{3})/);
     expect(m).not.toBeNull();
     const runId = m![1]!;
@@ -193,7 +193,7 @@ test("[CLI 端到端] collect-outcome 失败: 写失败的 test-results → reas
         encoding: "utf-8",
       });
 
-    const initOut = run("init", reqPath);
+    const initOut = run("init", reqPath, "--worktree-mode", "none");
     const runId = initOut.match(/created run: (\d{8}-\d{3})/)![1]!;
     const runDir = path.join(runsRoot, runId);
 
@@ -253,7 +253,7 @@ test("[CLI 端到端] bootstrap 降级: 跳过 dispatch, 手动翻 running + 写
         encoding: "utf-8",
       });
 
-    const initOut = run("init", reqPath);
+    const initOut = run("init", reqPath, "--worktree-mode", "none");
     const runId = initOut.match(/created run: (\d{8}-\d{3})/)![1]!;
     const runDir = path.join(runsRoot, runId);
 
@@ -327,7 +327,7 @@ test("[CLI 端到端] dispatch 输出 packets JSON 结构: {run_id, phase, human
         encoding: "utf-8",
       });
 
-    const initOut = run("init", reqPath);
+    const initOut = run("init", reqPath, "--worktree-mode", "none");
     const runId = initOut.match(/created run: (\d{8}-\d{3})/)![1]!;
     const runDir = path.join(runsRoot, runId);
 

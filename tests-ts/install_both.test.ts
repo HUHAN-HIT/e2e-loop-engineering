@@ -57,7 +57,7 @@ const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 
 beforeAll(() => {
   execSync("npm run build", { cwd: REPO_ROOT, stdio: "pipe" });
-});
+}, 30000);
 
 test("e2e: install --host both 一次装好 CC 侧 + OC 侧, 共享 SKILL 不冲突", () => {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "loop-both-e2e-"));

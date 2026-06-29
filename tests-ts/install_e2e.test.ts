@@ -54,7 +54,7 @@ const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 beforeAll(() => {
   // 构建很快 (约几十 ms), 确保 cli/dist 与 adapter-cc/dist 都是最新产物。
   execSync("npm run build", { cwd: REPO_ROOT, stdio: "pipe" });
-});
+}, 30000);
 
 test("e2e: node 跑构建后的 CLI bundle, 4 个 hook .mjs 真实落盘且非空", () => {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "loop-cc-e2e-"));

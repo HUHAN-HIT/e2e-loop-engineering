@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build -w @e2e-loop/shared && npm run build -w @e2e-loop/ssot && npm run build -w @e2e-loop/adapter-claude-code && npm run build -w @e2e-loop/adapter-opencode && npm run build -w @e2e-loop/cli",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "bun test tests-ts/",
     "publish:all": "npm publish --workspaces --access public",

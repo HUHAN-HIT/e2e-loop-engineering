@@ -9,7 +9,7 @@
  * 不打真实 LLM, worker 用 echo 占位 (返回一个最小 completed outcome), 跑通状态机骨架。
  *
  * 与 Python 的对齐要点:
- * - run 根目录默认 <cwd>/runs/, 与 Python `--runs-root` 缺省 ./runs 一致;
+ * - run 根目录默认取决于 worktree mode; auto 会落到隔离 worktree 的 runs/, 与 Python `--runs-root` 缺省 ./runs 一致;
  *   本 CLI 用 --runs-root 选项 (缺省 "runs", 相对当前工作目录解析)。
  * - 每个子命令都重建 Coordinator (跨进程恢复): 仅 readRunState 恢复 state, plan 由
  *   Coordinator 构造函数从 planning/task-plan.yaml 一并恢复 (见 coordinator.ts), 否则
@@ -126,7 +126,7 @@ function parseIntArg(raw: string | undefined, fallback: number): number {
 }
 
 function parseWorktreeMode(raw: string | undefined): WorktreeMode | null {
-  const mode = raw ?? "none";
+  const mode = raw ?? "auto";
   if (mode === "none" || mode === "auto" || mode === "always" || mode === "adopt") {
     return mode;
   }

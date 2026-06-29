@@ -131,6 +131,9 @@ function isRepoRoot(dir: string): boolean {
  */
 function repoRoot(): string {
   const start = path.dirname(fileURLToPath(import.meta.url));
+  const bundledAssets = path.join(start, "assets");
+  if (isRepoRoot(bundledAssets)) return bundledAssets;
+
   let dir = start;
   // 逐级向上, 直到命中判据或抵达文件系统根
   for (;;) {

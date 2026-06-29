@@ -3,7 +3,9 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,16 +16,59 @@
     "rootDir": ".",
     "baseUrl": ".",
     "paths": {
-      "@e2e-loop/shared": ["packages/shared/src/index.ts"],
-      "@e2e-loop/adapter-claude-code": ["packages/adapter-cc/src/index.ts"],
-      "@e2e-loop/adapter-opencode": ["packages/adapter-oc/src/index.ts"],
-      "@e2e-loop/cli": ["packages/cli/src/index.ts"],
-      "@e2e-loop/ssot": ["packages/ssot-ts/src/index.ts"],
-      "@e2e-loop/ssot/runtime": ["packages/ssot-ts/src/runtime/index.ts"],
-      "@e2e-loop/ssot/dispatch": ["packages/ssot-ts/src/dispatch/index.ts"],
-      "@e2e-loop/ssot/schema": ["packages/ssot-ts/src/schema/index.ts"]
+      "@e2e-loop/shared": [
+        "packages/shared/src/index.ts"
+      ],
+      "@e2e-loop/adapter-claude-code": [
+        "packages/adapter-cc/src/index.ts"
+      ],
+      "@e2e-loop/adapter-opencode": [
+        "packages/adapter-oc/src/index.ts"
+      ],
+      "@e2e-loop/cli": [
+        "packages/cli/src/index.ts"
+      ],
+      "@e2e-loop/ssot": [
+        "packages/ssot-ts/src/index.ts"
+      ],
+      "@e2e-loop/ssot/runtime": [
+        "packages/ssot-ts/src/runtime/index.ts"
+      ],
+      "@e2e-loop/ssot/dispatch": [
+        "packages/ssot-ts/src/dispatch/index.ts"
+      ],
+      "@e2e-loop/ssot/schema": [
+        "packages/ssot-ts/src/schema/index.ts"
+      ],
+      "@e2e-loop/ssot/state_machine": [
+        "packages/ssot-ts/src/state_machine/index.ts"
+      ],
+      "@e2e-loop/ssot/scheduling": [
+        "packages/ssot-ts/src/scheduling/index.ts"
+      ],
+      "@e2e-loop/ssot/checklists": [
+        "packages/ssot-ts/src/checklists/index.ts"
+      ],
+      "@e2e-loop/ssot/amendment": [
+        "packages/ssot-ts/src/amendment/index.ts"
+      ],
+      "@e2e-loop/ssot/multi_service": [
+        "packages/ssot-ts/src/multi_service/index.ts"
+      ],
+      "@e2e-loop/ssot/trust_mode": [
+        "packages/ssot-ts/src/trust_mode/index.ts"
+      ],
+      "@e2e-loop/ssot/worktree": [
+        "packages/ssot-ts/src/worktree/index.ts"
+      ]
     }
   },
-  "include": ["packages/*/src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  "include": [
+    "packages/*/src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts"
+  ]
 }

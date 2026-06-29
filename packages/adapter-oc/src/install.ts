@@ -60,6 +60,9 @@ function isRepoRoot(dir: string): boolean {
  */
 function repoRoot(): string {
   const start = path.dirname(fileURLToPath(import.meta.url));
+  const bundledAssets = path.join(start, "assets");
+  if (isRepoRoot(bundledAssets)) return bundledAssets;
+
   let dir = start;
   for (;;) {
     if (isRepoRoot(dir)) return dir;

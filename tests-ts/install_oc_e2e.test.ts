@@ -56,7 +56,7 @@ const CLI_BUNDLE = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 beforeAll(() => {
   // 构建确保 cli/dist 是最新产物 (含 adapter-oc + js-yaml bundle)。
   execSync("npm run build", { cwd: REPO_ROOT, stdio: "pipe" });
-});
+}, 30000);
 
 test("e2e: node 跑构建后的 CLI bundle, host=oc 资产真实落盘且非空", () => {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "loop-oc-e2e-"));

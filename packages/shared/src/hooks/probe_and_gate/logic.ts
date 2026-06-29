@@ -1,6 +1,6 @@
 /**
  * A. SessionStart —— capabilities 探测 + trust_mode 切换门
- * (规范源: design §3.4 / §5 / §0.3; 行为权威: Python `hooks/loop_engineering/probe_and_gate.py`)。
+ * (规范源: design §3.4 / §5 / §0.3)。
  *
  * 会话启动时:
  *   1. 探测宿主能力 (git 可用 / fs 可写)。
@@ -10,8 +10,10 @@
  *
  * SessionStart 异常时**退化放行** (与其它 hook 的 fail-safe=deny 不同), 不锁死会话。
  *
- * P1 占位: §0.3 独立复跑通道探测在 TS 端尚未实现 (依赖 Python `trust_mode/gate.py`);
- * 当前 unattended 档总是判定"通道未就绪" → block, 与 Python 探测失败回退行为一致。
+ * §0.3 独立复跑通道探测在仓库内尚未实现 (设计 §0.3 保留项, MVP 未落地);
+ * 当前 unattended 档总是判定"通道未就绪" → block。
+ * 行为与 @e2e-loop/ssot/trust_mode (gate.ts) 的 probeUnattendedReadiness 一致;
+ * hook 不直接 import ssot-ts (shared 不能反向依赖 ssot-ts), 但语义对齐。
  */
 
 import * as cp from "node:child_process";
@@ -78,12 +80,13 @@ export function probeCapabilities(repoRoot: string): Capabilities {
 }
 
 /**
- * §0.3 独立复跑通道就绪判定 (Python `trust_mode/gate.py:probe_unattended_readiness` 等价)。
+ * §0.3 独立复跑通道就绪判定 (与 @e2e-loop/ssot/trust_mode 的 probeUnattendedReadiness 行为对齐;
+ * hook 不能直接 import ssot-ts, 故本模块内独立实现)。
  *
- * P1 占位: TS 端尚未实现完整探测, 当前总是返回"未就绪"。
- * 这与 Python 探测异常时的回退行为一致 —— unattended 档拒绝静默降级。
+ * 当前实现: 总是返回"未就绪"——独立复跑通道是 design §0.3 保留项, 仓库内尚未实现。
+ * unattended 档因此被拒绝 (拒绝静默降级, §5)。
  *
- * TODO(P3): 接入跨进程独立复跑通道探测 (IPC / 子进程健康检查)。
+ * 通道实现落地后 (跨进程 IPC / 子进程健康检查), 把本函数改为真实探测。
  */
 export function probeUnattendedReadiness(): {
   ready: boolean;
@@ -91,7 +94,7 @@ export function probeUnattendedReadiness(): {
 } {
   return {
     ready: false,
-    reasons: ["TS 端 §0.3 通道探测未实现 (P1 占位)"],
+    reasons: ["独立复跑通道未建 (§0.3 保留项, 仓库内未实现)"],
   };
 }
 

@@ -1,5 +1,5 @@
 {
-  "version": "0.2.0-alpha",
+  "version": "1.0.0-alpha",
   "skill": {
     "source": "core/coordinator.md",
     "skillName": "loop-engineering"

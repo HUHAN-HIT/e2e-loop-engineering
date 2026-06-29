@@ -3,8 +3,8 @@
 > 本文件给出 Loop Engineering 各阶段反复出现、但 SKILL.md 未操作化的关键术语的**可判定定义 + 反例清单**。
 > 所有 worker / coordinator 在用到这些词做"自检"时, 以本文件的判据为准, **不要凭语感判断**。
 >
-> 定位: 本文件是 craft 标准层 (`standards/`) 的公共底座, 与代码 SSOT (`loop_engineering/` Python 包) 互补——
-> Python 包定义"机械检查怎么算", 本文件定义"人/agent 在写产物时怎么算做对了"。两者冲突时, 凡涉及机械求值以 Python 包为准, 凡涉及 craft 判断以本文件为准。
+> 定位: 本文件是 craft 标准层 (`standards/`) 的公共底座, 与代码 SSOT (`@e2e-loop/ssot`, TS) 互补——
+> TS SSOT 定义"机械检查怎么算", 本文件定义"人/agent 在写产物时怎么算做对了"。两者冲突时, 凡涉及机械求值以 TS SSOT 为准, 凡涉及 craft 判断以本文件为准。
 
 ---
 
@@ -36,7 +36,7 @@
 | "断言字段是否合理" | 形容词 | `assert 的字段 in 产物已声明字段集` |
 | "改动范围是否过大" | 无阈值 | `actual_writes 全部命中 allowed_write_paths` |
 
-**与 SSOT 的关系:** checks 文法的形式定义与求值见 `loop_engineering/checklists/checks_eval.py:parse_check` / `eval_check`。凡写不出落入该文法的断言, 即非客观可判定。
+**与 SSOT 的关系:** checks 文法的形式定义与求值见 `@e2e-loop/ssot/checklists` 的 `parseCheck` / `evalCheck`。凡写不出落入该文法的断言, 即非客观可判定。
 
 ---
 
@@ -73,7 +73,7 @@
 1. 改了**公共接口 / 导出符号 / API surface / 函数签名** (调用方能观察)。
 2. 改了**控制流核心 / 状态机 / 调度 / 鉴权 / 校验**逻辑。
 3. 改了**数据格式 / schema / 迁移 / 序列化**。
-4. 落在 `risk: high` 或 `exclusive` 的 task 内 (这两类 task 的 key-diffs **必填非空且可解析**, 否则视为未提交退回——见 `loop_engineering/checklists/key_diffs_gate.py:validate_key_diffs_submission`)。
+4. 落在 `risk: high` 或 `exclusive` 的 task 内 (这两类 task 的 key-diffs **必填非空且可解析**, 否则视为未提交退回——见 `@e2e-loop/ssot/checklists` 的 `validateKeyDiffsSubmission`)。
 5. 引入**新依赖 / 改 lockfile / 改构建配置**。
 6. 单文件改动 > ~80 行的实质逻辑 (非格式化/非生成)。
 
@@ -108,7 +108,7 @@
 | 前端 + 后端但本 run 只动后端 | 本 run 只触及一个 service | 单服务 |
 | 一个库的多个子模块 | 同发布单元 | 单服务 |
 
-**多 repo 提示:** 真·多 service 且跨 repo 时, 加 `service → 物理树` 映射 (`loop_engineering/multi_service/service_map.py:resolve_worktree_for_task`); MVP 边界建议"多服务 = monorepo", 多 repo 降级为多个独立 run。
+**多 repo 提示:** 真·多 service 且跨 repo 时, 加 `service → 物理树` 映射 (`@e2e-loop/ssot/multi_service` 的 `resolveWorktreeForTask`); MVP 边界建议"多服务 = monorepo", 多 repo 降级为多个独立 run。
 
 ---
 

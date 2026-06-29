@@ -74,7 +74,7 @@ AC 是整个 run 的真理来源——所有 task、所有测试都回指 AC。A
 **拆分自检 (每个 task 都要过):** `[M][C]`
 1. 单一职责, 一句话说清产出 (无"并且")。
 2. `allowed_write_paths` 用**具体前缀目录**, 不用裸 `**` (裸 `**` → 冲突保守串行, 见评审 F3)。
-3. 可并行的 task 之间**写路径不重叠** (相交判定见 `loop_engineering/scheduling/path_overlap.py:path_globs_overlap`)。
+3. 可并行的 task 之间**写路径不重叠** (相交判定见 `@e2e-loop/ssot/scheduling` 的 `pathGlobsOverlap`)。
 4. `depends_on` 只连**真实数据/产物依赖**, 不为"我觉得该先做"加假依赖 (假依赖伤并发)。
 5. 改控制面/迁移/lockfile/codegen 的 task 标 `exclusive: true` (它不与任何 task 同批)。
 6. `depends_on` 不成环。
@@ -88,7 +88,7 @@ AC 是整个 run 的真理来源——所有 task、所有测试都回指 AC。A
 
 ## 5. task-plan.yaml 主契约
 
-schema 以 `loop_engineering/schema/task_plan.py` 为参考。每个 task 必含: `id`, `title`, `allowed_write_paths`, `depends_on`(可空), `acceptance_refs`, `exclusive`, `risk`, `tests`。
+schema 以 `@e2e-loop/ssot/schema` (`task_plan.ts`) 为参考。每个 task 必含: `id`, `title`, `allowed_write_paths`, `depends_on`(可空), `acceptance_refs`, `exclusive`, `risk`, `tests`。
 
 ```yaml
 complexity: complex
@@ -136,7 +136,7 @@ tasks:
 
 ---
 
-## 6. 计划自检 (返回前必跑; 完整实现见 `loop_engineering/checklists/plan_check.py:check_plan`)
+## 6. 计划自检 (返回前必跑; 完整实现见 `@e2e-loop/ssot/checklists` 的 `checkPlan`)
 
 `[S][M][C]`:
 - [ ] 每个 AC 至少映射 1 个 task 和 1 个测试用例。

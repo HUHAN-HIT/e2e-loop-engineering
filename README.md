@@ -82,14 +82,14 @@ e2e-loop install --host both --project-dir <path>
 
 ```
 core/                宿主无关 SSOT (coordinator.md 提示词 + subagents/ + standards/ + manifest.json)
-adapters/            宿主适配资产 (claude-code/ hooks 模板 + opencode/ plugin 模板)
 packages/            npm workspace 包
-  ├── cli/           @e2e-loop/cli         — e2e-loop 命令 (install/uninstall/list + dry-run)
+  ├── cli/           @e2e-loop/cli         — e2e-loop 命令 (install/uninstall/list + dry-run + dispatch)
   ├── adapter-cc/    @e2e-loop/adapter-claude-code — CC adapter (4 hook 编译为 .mjs)
   ├── adapter-oc/    @e2e-loop/adapter-opencode    — OC adapter (4 hook 等价 plugin bundle)
   ├── shared/        @e2e-loop/shared      — 跨 adapter 共享层 (hook logic / path_match / actual_writes)
   └── ssot-ts/       @e2e-loop/ssot        — TS 算法 SSOT (schema/state_machine/scheduling/checklists/...)
-loop_engineering/    Python 包 (deprecated 共存期, 等价测试锚点, 计划 1.0.0 移除)
+bin/                 e2e-loop wrapper (→ packages/cli/dist/index.js, 构建 后可用)
+docs/                设计文档与规范源
 ```
 
 - 同一份 hook 判断核心 (`packages/shared/src/hooks/*/logic.ts`) 被 CC binding 与 OC binding 共享, 保证两宿主决策一致 (设计 §5.2 / §6.1)。
@@ -103,19 +103,14 @@ TS SSOT 与跨宿主一致性 (设计 D-4: 测试运行时用 Bun):
 
 ```bash
 npx bun test tests-ts/        # 全套 TS 测试 (等价测试 + 集成 + 跨宿主一致性)
-```
-
-Python 等价测试锚点 (共存期):
-
-```bash
-pytest                        # Python SSOT 测试
+npx tsc --noEmit              # 类型检查
 ```
 
 ---
 
 ## 迁移状态
 
-源自设计 §11 路线图。`ssot-ts` 为 TS 算法 SSOT; `loop_engineering/` Python 包进入 deprecated 共存期。
+源自设计 §11 路线图。`ssot-ts` 为唯一算法 SSOT; 原 Python `loop_engineering/` 包已于 2026-06-28 (用户决策) 物理移除, TS 等价测试守护行为对齐。
 
 | 阶段 | 目标 | 状态 |
 | --- | --- | --- |

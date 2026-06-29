@@ -41,7 +41,7 @@
 - 用 `@skip` 跳过跑不通的用例再报绿。
 - "我觉得应该能过" 但没真跑。
 
-**注意:** `actual_writes` (实际写了哪些文件) **不要你报**——coordinator 从 git diff 自采 (`loop_engineering/scheduling/actual_writes.py:collect_actual_writes`), 故越界检测独立于你的诚实, 你不必也不应自报写入清单。
+**注意:** `actual_writes` (实际写了哪些文件) **不要你报**——coordinator 从 git diff 自采 (`@e2e-loop/shared` 的 `computeActualWrites`), 故越界检测独立于你的诚实, 你不必也不应自报写入清单。
 
 ---
 
@@ -51,7 +51,7 @@ key-diffs 是收口时人**必须**看的那几处改动。判据见 `glossary.m
 
 **`tasks/<id>/key-diffs.yaml` (纯 YAML 独立文件), 每条 = `{file, change, why, risk}`:** `[S][M][C]`
 - 只列**关键** diff (命中 `glossary.md` §3 判据 1–6 之一): 改了对外契约/控制流/数据格式/高风险路径/依赖/大块逻辑。
-- `risk: high` / `exclusive` 的 task **此文件必填非空且可解析**, 否则视为未提交退回 (`loop_engineering/checklists/key_diffs_gate.py:validate_key_diffs_submission`)。
+- `risk: high` / `exclusive` 的 task **此文件必填非空且可解析**, 否则视为未提交退回 (`@e2e-loop/ssot/checklists` 的 `validateKeyDiffsSubmission`)。
 - 不要把每个文件、每处改名、每行注释都列进来——全列等于没列 (制造噪音, 淹没真关键项)。
 
 **示例:**
@@ -77,7 +77,7 @@ key-diffs 是收口时人**必须**看的那几处改动。判据见 `glossary.m
   ```json
   { "status": "plan-amendment-needed", "reason": "...", "touched_acceptance_refs": ["AC-002"] }
   ```
-  **必须声明触及的 AC** (coordinator 据此确定性回滚相关 task, 见 `loop_engineering/amendment/rollback.py:compute_rollback`)。
+  **必须声明触及的 AC** (coordinator 据此确定性回滚相关 task, 见 `@e2e-loop/ssot/amendment` 的 `computeRollback`)。
 - task **过大** (一个 worker 持不住上下文) → 返回 `task-needs-split`, 不硬塞。
 - 只是实现细节卡住 (某库用法不会) → 自己查/试, **不**走 amendment (这不是计划的错)。
 

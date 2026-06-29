@@ -1,19 +1,21 @@
-# Loop Engineering · Claude Code 三层工件
+# Loop Engineering · 三层工件 (宿主无关 SSOT)
 
-协作式 (非对抗) 多阶段开发 harness, 落地为 Claude Code 原生形态: **1 个 skill + 4 个子 agent + Python 算法参考库**.
+协作式 (非对抗) 多阶段开发 harness, 落地为 Claude Code + OpenCode 双宿主原生形态: **1 个 skill + 4 个子 agent + TS 算法 SSOT**.
+
+> 本目录是宿主无关的"源" (`coordinator.md` / `subagents/` / `standards/` / `manifest.json`), 由 `packages/adapter-cc` 与 `packages/adapter-oc` 在 `e2e-loop install` 时渲染并落到目标项目的 `.claude/` 与 `.opencode/`.
 
 ## 三层结构
 
-| 层 | 路径 | 职责 |
-| --- | --- | --- |
-| **skill (协调器提示词)** | `.claude/skills/loop-engineering/SKILL.md` | 主 agent 加载后即 coordinator, 推状态机、跑客观自检、计划必停人且收口异常/高风险才停人 |
-| **craft 标准层** | `.claude/skills/loop-engineering/standards/*.md` | 各阶段"怎么做才算好"的判据/正反例/样例; 由 SKILL.md 与各子 agent 一行指针按需引用 |
-| **subagents (4 个角色)** | `.claude/agents/*.md` | 由主 agent 通过 Task 工具按阶段分发, 隔离上下文产出 worker 产物 |
-| **Python 算法 SSOT** | 已安装包中的 `loop_engineering/` | 协作式判断原语的可执行参考库 (路径相交 / checks 文法 / 保守扩围 / 契约 diff 等) |
+| 层 | 源 (本仓库) | 落到目标项目 | 职责 |
+| --- | --- | --- | --- |
+| **skill (协调器提示词)** | `core/coordinator.md` | `.claude/skills/loop-engineering/SKILL.md` | 主 agent 加载后即 coordinator, 推状态机、跑客观自检、计划必停人且收口异常/高风险才停人 |
+| **craft 标准层** | `core/standards/*.md` | `.claude/skills/loop-engineering/standards/*.md` | 各阶段"怎么做才算好"的判据/正反例/样例; 由 SKILL.md 与各子 agent 一行指针按需引用 |
+| **subagents (4 个角色)** | `core/subagents/*.md` | `.claude/agents/*.md` | 由主 agent 通过 Task 工具按阶段分发, 隔离上下文产出 worker 产物 |
+| **TS 算法 SSOT** | `packages/ssot-ts/` (`@e2e-loop/ssot`) | 不落地 (仅在仓库内供 hook/CLI 调用) | 协作式判断原语的可执行实现 (路径相交 / checks 文法 / 保守扩围 / 契约 diff 等) |
 
 ## craft 标准层 (standards/)
 
-`SKILL.md` + Python SSOT 规定了**状态机、产物 schema、客观门禁**(what + 红线); `standards/` 补上**"怎么做才算好"**(how-well) —— 这是信条 2「预防 > 检测」要求重投入、但此前未操作化的一层。
+`SKILL.md` + TS SSOT 规定了**状态机、产物 schema、客观门禁**(what + 红线); `standards/` 补上**"怎么做才算好"**(how-well) —— 这是信条 2「预防 > 检测」要求重投入、但此前未操作化的一层.
 
 | 文件 | 关闭的缺口 |
 | --- | --- |
@@ -53,18 +55,19 @@
 
 `plan_signoff` 是必经人锚点；`wrap_up_signoff` 是条件锚点，仅收口异常或高风险时让人停下确认。其余环节自动。
 
-## Python 包何时被引用、何时不会被调用
+## SSOT 何时被引用、何时不会被调用
 
-- **会被引用 (作为 SSOT 脚注):** SKILL.md 和子 agent 提示词在需要描述某个判断原语时, 以脚注 `loop_engineering/<subpkg>/<file>.py:<function>` 形式标出参考实现. 主 agent 按描述执行, 不需要真的 import.
-- **不会被运行时调用:** 主 agent 不会在 Claude Code 会话里执行 Python. `runtime/` / `dispatch/` / `cli.py` 仅用于本地 dry-run 与算法测试, Claude Code 入口不走它们.
-- **可执行规范源:** 当提示词表述模糊时, 以 Python 包对应模块的实现与测试为唯一规范源.
+- **会被引用 (作为 SSOT 脚注):** `coordinator.md` 和子 agent 提示词在需要描述某个判断原语时, 以脚注 `@e2e-loop/ssot/<subpkg>` (TS) 形式标出参考实现. 主 agent 按描述执行, 不需要真的 import.
+- **不会被运行时调用:** 主 agent 不会在 Claude Code 会话里直接 import SSOT. SSOT 在仓库内被 hooks (经 `@e2e-loop/shared`) 与 CLI (`packages/cli`) 调用; 目标项目通过 install 落盘的 `.mjs` 已 bundle 进相关逻辑.
+- **可执行规范源:** 当提示词表述模糊时, 以 `packages/ssot-ts/` 对应模块的实现与测试为唯一规范源.
 
 ## 测试入口
 
-```powershell
-loop-eng install-claude --project-dir <target-project> --force
-.\.venv\Scripts\Activate.ps1   # 或 python -m venv .venv 后安装
-pytest                          # 265+ 测试覆盖算法 SSOT
+```bash
+npm install                      # workspace 安装
+npm run build                    # 构建 adapter-cc/adapter-oc/cli 产物
+npx bun test tests-ts/           # 全套 TS 测试 (等价 + 集成 + 跨宿主一致性)
+npx tsc --noEmit                 # 类型检查
 ```
 
-测试覆盖 `schema/` `state_machine/` `scheduling/` `checklists/` `amendment/` `multi_service/` `trust_mode/`; `runtime/` `dispatch/` `cli.py` 仅最小契约测试.
+测试覆盖 `schema/` `state_machine/` `scheduling/` `checklists/` `amendment/` `multi_service/` `trust_mode/` `runtime/` `dispatch/` `worktree/`; 等价测试在 `tests-ts/ssot/`, 集成与跨宿主一致性在 `tests-ts/` 根。

@@ -18,13 +18,8 @@ env/
 
 # Loop Engineering 运行时产物
 runs/
-tests/fixtures/smoke/runs/
-
-# 归档的 Python SSOT (本地保留, 不进远程仓库 — 用户决策 2026-06-28)
-# Python 包 (loop_engineering/ + tests/ + pyproject.toml) 已迁移到 TS (packages/ssot-ts),
-# 归档到 archive/python-ssot/ 仅作本地参考锚点; 不跟踪、不推送到远程。
+tests-ts/fixtures/smoke/runs/
 archive/
-
 # IDE
 .idea/
 .vscode/

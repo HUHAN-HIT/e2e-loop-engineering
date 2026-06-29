@@ -42,9 +42,9 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 2. 先写测试去满足 planned 的 checks (可先看到它失败, 但这是你自己的开发节奏, 不需要向任何人证明时序)。
 3. 实现代码, 跑测试到绿。改动严格限制在 `allowed_write_paths` 内。
 4. 产出三个文件:
-   - `tasks/<id>/test-results.yaml`: `{ tests_green: bool, cases: [ {id, passed: bool, failure_reason: str} ] }` —— 每个 case **只准填这三个固定字段, 不得自创字段**: `passed` 供 coordinator 对 checks 机械求值 (求值规则参考 `loop_engineering/checklists/checks_eval.py:eval_case`), `failure_reason` 仅供人读; 自创或未知字段会被判该 check 失败 + 告警。`actual_writes` **不要你报** —— coordinator 会从 git diff 自采。
+   - `tasks/<id>/test-results.yaml`: `{ tests_green: bool, cases: [ {id, passed: bool, failure_reason: str} ] }` —— 每个 case **只准填这三个固定字段, 不得自创字段**: `passed` 供 coordinator 对 checks 机械求值 (求值规则参考 `@e2e-loop/ssot/checklists` 的 `evalCase`), `failure_reason` 仅供人读; 自创或未知字段会被判该 check 失败 + 告警。`actual_writes` **不要你报** —— coordinator 会从 git diff 自采。
    - `tasks/<id>/summary.md`: ≤1200 字, 说清做了什么、关键决策。
-   - `tasks/<id>/key-diffs.yaml` (**纯 YAML 独立文件**): 每条 = `{file, change, why, risk}`; 收口阶段 coordinator 直接解析各 yaml 汇总到 `wrap-up/key-diffs.md`。`risk: high` / `exclusive` 的 task 此文件必填非空且可解析 (分级门判定参考 `loop_engineering/checklists/key_diffs_gate.py:validate_key_diffs_submission`).
+   - `tasks/<id>/key-diffs.yaml` (**纯 YAML 独立文件**): 每条 = `{file, change, why, risk}`; 收口阶段 coordinator 直接解析各 yaml 汇总到 `wrap-up/key-diffs.md`。`risk: high` / `exclusive` 的 task 此文件必填非空且可解析 (分级门判定参考 `@e2e-loop/ssot/checklists` 的 `validateKeyDiffsSubmission`).
 5. (多服务) 若触及某契约 surface, 必须同步更新 `service-contracts.yaml`, 并在 summary 声明 `contract_changes: [C-xxx]`。
 
 ### 返回前自检 (对照任务自检, 不过自己修一次)
@@ -53,11 +53,11 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 - 每个 `acceptance_ref` 有对应测试
 - 没动其它 task 的写路径
 
-(完整任务自检实现参考 `loop_engineering/checklists/task_check.py:check_task`.)
+(完整任务自检实现参考 `@e2e-loop/ssot/checklists` 的 `checkTask`.)
 
 ## 红线
 
-- 不擅自删除、弱化、改名 planned 用例或其 checks。planned 用例不可执行或本身错了 → 返回 `{ status: "plan-amendment-needed", reason, touched_acceptance_refs: [...] }` 回到 PLANNING(**必须声明触及的 AC**, coordinator 据此确定性回滚相关 task —— 回滚算法参考 `loop_engineering/amendment/rollback.py:compute_rollback`), 不硬做。
+- 不擅自删除、弱化、改名 planned 用例或其 checks。planned 用例不可执行或本身错了 → 返回 `{ status: "plan-amendment-needed", reason, touched_acceptance_refs: [...] }` 回到 PLANNING(**必须声明触及的 AC**, coordinator 据此确定性回滚相关 task —— 回滚算法参考 `@e2e-loop/ssot/amendment` 的 `computeRollback`), 不硬做。
 - 不扩 scope, 不写 `allowed_write_paths` 外的文件(白名单是软约束, 但越界会被 `actual_writes` + 收口 diff 抓到, 且这是真问题不是抓作弊)。
-- 不谎报 `tests_green`。你做不到就上报, 这比一个假绿安全得多。(`actual_writes` 不再经你手——coordinator 从 git diff 自采, 采集逻辑参考 `loop_engineering/scheduling/actual_writes.py:collect_actual_writes`.)
+- 不谎报 `tests_green`。你做不到就上报, 这比一个假绿安全得多。(`actual_writes` 不再经你手——coordinator 从 git diff 自采, 采集逻辑参考 `@e2e-loop/shared` 的 `computeActualWrites`.)
 - 不写 `run-state` / events / 别的 task 目录。

@@ -342,10 +342,11 @@ test("phase=CREATED 无 human_pending → allow (允许推进)", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// 用例 10: phase=PLANNING (无 human_pending) → allow (P1 占位, plan_check 在 P4 接入)
+// 用例 10: phase=PLANNING (无 human_pending) + 无 plan-check-failures.json → allow
+// (软通过: submitPlan 还没跑过或上次通过了, 让 agent 推进到 plan_signoff)
 // ---------------------------------------------------------------------------
 
-test("phase=PLANNING 无 human_pending → allow (P1 占位)", async () => {
+test("phase=PLANNING 无 human_pending + 无 plan-check-failures.json → allow", async () => {
   const repoRoot = makeRepoRoot("planning");
   makeRun(
     repoRoot,
@@ -361,15 +362,55 @@ test("phase=PLANNING 无 human_pending → allow (P1 占位)", async () => {
   );
 
   const out = await handleGuardAnchors(stopInput(repoRoot));
-  // P1 占位: TS 端 PLANNING 直接放行 (Python 跑 plan_check, 为已知偏差; 见简报)
+  // planning/plan-check-failures.json 不存在 → 软通过放行
   expect(out.decision).toBe("allow");
 });
 
 // ---------------------------------------------------------------------------
-// 用例 11: phase=WRAPPING_UP (无 human_pending) → allow (P1 占位)
+// 用例 10b: phase=PLANNING + plan-check-failures.json 存在且非空 → deny
+// (Coordinator.submitPlan 失败后落的结果文件, hook 据此门禁)
 // ---------------------------------------------------------------------------
 
-test("phase=WRAPPING_UP 无 human_pending → allow (P1 占位)", async () => {
+test("phase=PLANNING + plan-check-failures.json 非空 → deny", async () => {
+  const repoRoot = makeRepoRoot("planningfail");
+  const runDir = makeRun(
+    repoRoot,
+    "20260101-001",
+    {
+      run_id: "20260101-001",
+      phase: "PLANNING",
+      complexity: "simple",
+      trust_mode: "collaborative",
+      active_tasks: [],
+    },
+    SINGLE_RUNNING_PLAN,
+  );
+
+  // 模拟 Coordinator.submitPlan 失败写下的结果文件
+  const planningDir = path.join(runDir, "planning");
+  fs.mkdirSync(planningDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(planningDir, "plan-check-failures.json"),
+    JSON.stringify([
+      { check: "path_overlap", passed: false, detail: "T1 与 T2 写路径重叠 src/" },
+      { check: "acceptance_refs", passed: false, detail: "T3 缺 AC-002" },
+    ]),
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("deny");
+  // reason 应含失败项明细, 便于 agent 定位
+  const reason = (out as { reason?: string }).reason ?? "";
+  expect(reason).toContain("path_overlap");
+  expect(reason).toContain("acceptance_refs");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 11: phase=WRAPPING_UP (无 human_pending) + 无 check-result.json → allow
+// (submitWrapUp 还没跑过 → 软通过, 不锁死)
+// ---------------------------------------------------------------------------
+
+test("phase=WRAPPING_UP 无 human_pending + 无 check-result.json → allow", async () => {
   const repoRoot = makeRepoRoot("wrapup");
   makeRun(
     repoRoot,
@@ -385,7 +426,74 @@ test("phase=WRAPPING_UP 无 human_pending → allow (P1 占位)", async () => {
   );
 
   const out = await handleGuardAnchors(stopInput(repoRoot));
-  // P1 占位: TS 端 WRAPPING_UP 直接放行 (Python 跑 wrap_up_check, 为已知偏差; 见简报)
+  expect(out.decision).toBe("allow");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 11b: phase=WRAPPING_UP + check-result.json 任一 fail → deny
+// ---------------------------------------------------------------------------
+
+test("phase=WRAPPING_UP + check-result.json 含 fail → deny", async () => {
+  const repoRoot = makeRepoRoot("wrapupfail");
+  const runDir = makeRun(
+    repoRoot,
+    "20260101-001",
+    {
+      run_id: "20260101-001",
+      phase: "WRAPPING_UP",
+      complexity: "simple",
+      trust_mode: "collaborative",
+      active_tasks: [],
+    },
+    SINGLE_RUNNING_PLAN,
+  );
+
+  const wrapUpDir = path.join(runDir, "wrap-up");
+  fs.mkdirSync(wrapUpDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(wrapUpDir, "check-result.json"),
+    JSON.stringify([
+      { check: "all_tasks_complete", passed: true, detail: "5/5" },
+      { check: "key_diffs_high_risk_filled", passed: false, detail: "T2 缺 key-diffs.yaml" },
+    ]),
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("deny");
+  const reason = (out as { reason?: string }).reason ?? "";
+  expect(reason).toContain("key_diffs_high_risk_filled");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 11c: phase=WRAPPING_UP + check-result.json 全 pass → allow
+// ---------------------------------------------------------------------------
+
+test("phase=WRAPPING_UP + check-result.json 全 pass → allow", async () => {
+  const repoRoot = makeRepoRoot("wrapuppass");
+  const runDir = makeRun(
+    repoRoot,
+    "20260101-001",
+    {
+      run_id: "20260101-001",
+      phase: "WRAPPING_UP",
+      complexity: "simple",
+      trust_mode: "collaborative",
+      active_tasks: [],
+    },
+    SINGLE_RUNNING_PLAN,
+  );
+
+  const wrapUpDir = path.join(runDir, "wrap-up");
+  fs.mkdirSync(wrapUpDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(wrapUpDir, "check-result.json"),
+    JSON.stringify([
+      { check: "all_tasks_complete", passed: true, detail: "5/5" },
+      { check: "key_diffs_high_risk_filled", passed: true, detail: "T2 ok" },
+    ]),
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
   expect(out.decision).toBe("allow");
 });
 

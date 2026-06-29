@@ -2,7 +2,7 @@
 
 > 适用角色: `plan-agent` (设计 planned 用例时) 与 `implementation-worker` (落成测试代码时)。两端共用本标准, 确保"设计的用例"与"写出的测试"是同一回事。
 > 本标准回答: 怎么从一条 AC 推导出真正覆盖它的用例、覆盖到什么程度、checks 怎么写才"可机械判定"。
-> 可机械判定的术语判据见 `glossary.md` §1; checks 文法求值见 `loop_engineering/checklists/checks_eval.py:parse_check` / `eval_check`。
+> 可机械判定的术语判据见 `glossary.md` §1; checks 文法求值见 `@e2e-loop/ssot/checklists` 的 `parseCheck` / `evalCheck`。
 
 体例: 推导链 → 覆盖规则 → 断言正/反例 → worked example。规则带 `[S][M][C]` 档标记。
 
@@ -76,7 +76,7 @@ cases:
   - { id: T02-CASE-002, passed: false, failure_reason: "" }   # passed 供 coordinator 对 checks 机械求值
 ```
 
-**每个 case 只准填 `id` / `passed` / `failure_reason` 三个固定字段, 不得自创字段** (自创/未知字段 → 该 check 判失败 + 告警)。求值规则见 `loop_engineering/checklists/checks_eval.py:eval_case`。`passed` 是 case 的整体真假, 由 worker 跑测试得到; checks 里的具体字段值由 worker 在测试代码内断言, coordinator 只对 case 级 `passed` 与 planned checks 做一致性核对。
+**每个 case 只准填 `id` / `passed` / `failure_reason` 三个固定字段, 不得自创字段** (自创/未知字段 → 该 check 判失败 + 告警)。求值规则见 `@e2e-loop/ssot/checklists` 的 `evalCase`。`passed` 是 case 的整体真假, 由 worker 跑测试得到; checks 里的具体字段值由 worker 在测试代码内断言, coordinator 只对 case 级 `passed` 与 planned checks 做一致性核对。
 
 ---
 

@@ -272,17 +272,19 @@ function handlePlan(runDir: string): HandleResult {
     };
   }
 
-  // P1 占位: plan_check 完整 TS 实现在 P4; 这里只校验 artifact 落盘 + plan 可解析,
-  // 不做 path_overlap / acceptance_refs / risk:high key-diffs 等细节检查。
-  // TODO(P4): 接入 plan_check.ts 完整实现, 与 Python checklists/plan_check.py 行为对齐。
+  // hook 设计边界: 这里只校验 artifact 落盘 + plan 可解析 (§0.4 artifact-first)。
+  // plan_check 的完整机械检查 (path_overlap / acceptance_refs / risk:high key-diffs 等)
+  // 由 Coordinator.submitPlan 跑, 结果落 planning/plan-check-failures.json;
+  // guard_anchors 在 PLANNING 阶段读该结果文件做 Stop 门禁。
+  // 本 hook 不重跑 plan_check (避免循环依赖 + 避免与 Coordinator 双写结果)。
   return {
     output: injectContext({
       verified: true,
       worker: WORKER_PLAN,
       artifacts,
-      plan_check_all_pass: true, // P1 占位: artifact 落盘即视为通过
+      plan_check_all_pass: true, // hook 不评判; 真值由 Coordinator.submitPlan 跑出后落 plan-check-failures.json
       warnings: [],
-      note: "P1 占位: plan_check 完整检查在 P4 接入 (path_overlap / acceptance_refs / risk:high key-diffs)",
+      note: "plan_check 由 Coordinator.submitPlan 跑 (非 hook); 失败项见 planning/plan-check-failures.json",
     }),
   };
 }
@@ -460,7 +462,7 @@ function readSideEffectContent(result: HandleResult, _runDir: string): unknown {
  *   3. subagent_type="implementation-worker" + test-results.yaml.tests_green=false → defer;
  *      context.tests_green_mechanical=false (不 block, 由 coordinator 决定)
  *   4. subagent_type="plan-agent" + design.md + task-plan.yaml 齐全 → defer;
- *      context.verified=true (P1 占位 plan_check_all_pass=true)
+ *      context.verified=true (hook 不评判 plan_check; 真值由 Coordinator.submitPlan 跑)
  *   5. subagent_type="clarification-finder" + questions.json 含 3 问题 → defer;
  *      context.question_count=3
  *   6. subagent_type="clarification-finder" + 空 questions 且空 skip_basis → deny; reason 含 "skip_basis"

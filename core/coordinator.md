@@ -4,7 +4,7 @@ description: 协作式多阶段开发 harness (澄清 → 计划 → 实现 → 
 license: MIT
 compatibility: claude-code,opencode
 metadata:
-  version: 0.5.0-alpha
+  version: 1.0.0-alpha
   standards: glossary,clarification,plan,test-design,implementation,review
 ---
 
@@ -25,9 +25,9 @@ worker 任务通过 **Task 工具** 分发给 4 个子 agent:
 
 分发时, 把对应 packet 作为 Task 工具的首条消息发给子 agent; 收回的只是产物文件路径 + summary, **不要把子 agent 的长日志拉回主上下文**.
 
-**算法真理来源 (SSOT):** 本 skill 中提到的判断原语 (路径相交、checks 文法评估、保守扩围等) 以 当前安装包中的 `loop_engineering/` Python 包实现为参考 —— 那是规范源的可执行版. 提示词引用 SSOT 处都用脚注形式标出 (`loop_engineering/<subpkg>/<file>.py:<function>`), 默认按描述执行; 当 hook/CLI 可用时, 以 Python SSOT 的机械检查结果为准.
+**算法真理来源 (SSOT):** 本 skill 中提到的判断原语 (路径相交、checks 文法评估、保守扩围等) 以仓库内的 TS SSOT 包 `@e2e-loop/ssot` (`packages/ssot-ts/`) 为可执行规范源. 提示词引用 SSOT 处都用脚注形式标出 (`@e2e-loop/ssot/<subpkg>` 模块的对应导出函数), 默认按描述执行; 当 hook/CLI 可用时, 以 TS SSOT 的机械检查结果为准.
 
-**craft 标准层 (`standards/`):** 各阶段"怎么做才算好"的判据、正/反例与样例放在本 skill 的 `standards/` 子目录 —— `glossary.md` (客观可判定/阻塞性歧义/关键 diff/service 边界/任务粒度的操作定义) + 五份阶段标准 (clarification / plan / test-design / implementation / review)。**Python SSOT 定义"机械检查怎么算", craft 标准定义"产出时怎么算做对了"**, 两者互补。每条规则带 `[S][M][C]` 复杂度档标记 —— simple 需求不要套 complex 标准, 摩擦匹配复杂度。分发各 worker 时其提示词已指向对应标准; 你 (coordinator) 跑客观自检时也可回指 `standards/glossary.md` 的操作定义来消除"靠语感判断"。
+**craft 标准层 (`standards/`):** 各阶段"怎么做才算好"的判据、正/反例与样例放在本 skill 的 `standards/` 子目录 —— `glossary.md` (客观可判定/阻塞性歧义/关键 diff/service 边界/任务粒度的操作定义) + 五份阶段标准 (clarification / plan / test-design / implementation / review)。**TS SSOT 定义"机械检查怎么算", craft 标准定义"产出时怎么算做对了"**, 两者互补。每条规则带 `[S][M][C]` 复杂度档标记 —— simple 需求不要套 complex 标准, 摩擦匹配复杂度。分发各 worker 时其提示词已指向对应标准; 你 (coordinator) 跑客观自检时也可回指 `standards/glossary.md` 的操作定义来消除"靠语感判断"。
 
 ---
 
@@ -74,7 +74,7 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 - 返工**就近**:task 内的问题在 task 内修;只有改变验收语义才回 PLANNING,并告诉人。**不设独立的审查阶段**(审查是按需工具,见 §11)。
 - 任何阶段不能靠口头声明跳转,必须通过该阶段的自检门禁。
 - 用一个 `run-state` 记录当前状态(见 §9 schema)。你是它唯一的写者。
-- 阶段迁移合法性矩阵以 `loop_engineering/state_machine/transitions.py:can_transition` 为参考; 人工锚点 (`human_pending`) 的合法阶段组合以 `loop_engineering/state_machine/human_anchors.py:_validate_anchor` 为参考.
+- 阶段迁移合法性矩阵以 `@e2e-loop/ssot/state_machine` 的 `canTransition` 为参考; 人工锚点 (`human_pending`) 的合法阶段组合以同子包 `human_anchors.ts` 的 `setHumanPending`/`isAwaitingHuman` 为参考.
 
 ## 5. 阶段细则
 
@@ -127,14 +127,14 @@ dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**
 1. `planning/design.md`:简明设计。不写任何防伪/对抗机制。
 2. `planning/task-plan.yaml`:任务拆分 + 每个 task 的测试设计(schema 见 §9)。complex 必须拆成 DAG,每个 task 小到一个角色能独立持有上下文。
 3. 每个 AC 至少被 1 个 task 和 1 个测试用例覆盖;complex/状态机/控制面 task 至少 1 个负向用例。
-4. 每个测试用例只写 `scenario`(测什么)+ `checks`(断言哪些可机械判定的字段/状态)。**不要**写 red-first 时序、assert_fields、防伪 evidence 这些包装。**checks 文法白名单**:每条只允许 `<lhs> <op> <rhs>`,op ∈ {==,!=,in,not in,<,<=,>,>=},rhs 为字面量;不许函数、嵌套、自然语言(否则该用例退回重写)。checks 文法的形式定义与求值规则参考 `loop_engineering/checklists/checks_eval.py:eval_check` (及同文件 `parse_check`).
+4. 每个测试用例只写 `scenario`(测什么)+ `checks`(断言哪些可机械判定的字段/状态)。**不要**写 red-first 时序、assert_fields、防伪 evidence 这些包装。**checks 文法白名单**:每条只允许 `<lhs> <op> <rhs>`,op ∈ {==,!=,in,not in,<,<=,>,>=},rhs 为字面量;不许函数、嵌套、自然语言(否则该用例退回重写)。checks 文法的形式定义与求值规则参考 `@e2e-loop/ssot/checklists` 的 `parseCheck` / `evalCheck`.
 5. 不确定某项怎么测时,不许跳过:写出测试假设,或标记需澄清。
 6. (多服务)产出 `planning/service-contracts.yaml`,见 §10。
 
-**计划自检**(过不了自己修,仍不过升级给人; 完整客观项实现参考 `loop_engineering/checklists/plan_check.py:check_plan`):
+**计划自检**(过不了自己修,仍不过升级给人; 完整客观项实现参考 `@e2e-loop/ssot/checklists` 的 `checkPlan`):
 - [ ] 每个 AC 至少映射 1 个 task 和 1 个测试用例
 - [ ] 每个 task 有 `allowed_write_paths`、`depends_on`(可空)、`acceptance_refs`
-- [ ] 可并行 task 的写路径不重叠 (路径相交判断参考 `loop_engineering/scheduling/path_overlap.py:path_globs_overlap`)
+- [ ] 可并行 task 的写路径不重叠 (路径相交判断参考 `@e2e-loop/ssot/scheduling` 的 `pathGlobsOverlap`)
 - [ ] `depends_on` 不成环
 - [ ] (多服务)每个契约的 provider+consumer 都有对应 task、每个契约 ≥1 集成用例
 
@@ -142,9 +142,9 @@ dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**
 
 ### 阶段 3 · 实施(IMPLEMENTING)
 
-按 task DAG 的 **ready frontier** 渐进推进(测试写法/tests_green 定义/key-diffs 关键判据见 `standards/implementation-standard.md`)。task **四态**:`pending` / `running`(已派出未交回)/ `blocked`(二次自检失败或二次 stale, 待人接手)/ `complete`(交回且自检通过)。两层状态机(run 级 phase ↔ task.status)的同步顺序见设计 §3.7(ABORTED 优先于 watchdog)。worker 超时(阈值默认 simple 15 / medium 30 / complex 60 分钟, 可在 `run-state.config.watchdog_timeout_min` 调)/崩溃未交回 → 退回 `pending` 重派并作废本次派发(给一个 attempt 序号);被判超时的旧派发若迟到交回,**丢弃不用**。watchdog 决策逻辑参考 `loop_engineering/scheduling/watchdog.py:watchdog_tick` 与同模块 `detect_stale_tasks`.
+按 task DAG 的 **ready frontier** 渐进推进(测试写法/tests_green 定义/key-diffs 关键判据见 `standards/implementation-standard.md`)。task **四态**:`pending` / `running`(已派出未交回)/ `blocked`(二次自检失败或二次 stale, 待人接手)/ `complete`(交回且自检通过)。两层状态机(run 级 phase ↔ task.status)的同步顺序见设计 §3.7(ABORTED 优先于 watchdog)。worker 超时(阈值默认 simple 15 / medium 30 / complex 60 分钟, 可在 `run-state.config.watchdog_timeout_min` 调)/崩溃未交回 → 退回 `pending` 重派并作废本次派发(给一个 attempt 序号);被判超时的旧派发若迟到交回,**丢弃不用**。watchdog 决策逻辑参考 `@e2e-loop/ssot/scheduling` 的 `watchdogTick` 与 `detectStaleTasks`.
 
-每轮选可启动的 task (ready frontier 形式定义参考 `loop_engineering/scheduling/ready_frontier.py:ready_frontier`):
+每轮选可启动的 task (ready frontier 形式定义参考 `@e2e-loop/ssot/scheduling` 的 `readyFrontier`):
 ```
 对每个 pending task:
   其所有 depends_on 都 complete?         否 → 跳过
@@ -159,18 +159,18 @@ dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**
 3. 产出三个文件:
    - `tasks/<id>/test-results.yaml`:`{ tests_green, cases:[ {id, passed:bool, failure_reason:str} ] }` —— 每个 case **只准填这三个固定字段,不得自创字段**(passed 供你对 checks 机械求值,自创或未知字段会被判该 check 失败 + 告警)。
    - `tasks/<id>/summary.md`:≤1200 字,做了什么、关键决策。
-   - `tasks/<id>/key-diffs.yaml`(**纯 YAML 独立文件**):每条 = {file, change, why, risk};收口阶段你直接解析各 yaml 汇总到 `wrap-up/key-diffs.md`。risk:high / exclusive 的 task 此文件必填非空且可解析 (分级门判定参考 `loop_engineering/checklists/key_diffs_gate.py:validate_key_diffs_submission`),否则视为未提交退回。
+   - `tasks/<id>/key-diffs.yaml`(**纯 YAML 独立文件**):每条 = {file, change, why, risk};收口阶段你直接解析各 yaml 汇总到 `wrap-up/key-diffs.md`。risk:high / exclusive 的 task 此文件必填非空且可解析 (分级门判定参考 `@e2e-loop/ssot/checklists` 的 `validateKeyDiffsSubmission`),否则视为未提交退回。
 4. (多服务)若触及某契约 surface,必须同步更新 `service-contracts.yaml`,并在 summary 声明 `contract_changes:[C-xxx]`。
 
-**任务自检**(每 task 交回时跑; 完整实现参考 `loop_engineering/checklists/task_check.py:check_task`):
-- [ ] 测试绿(角色自己跑的结果; 求值入口参考 `loop_engineering/checklists/checks_eval.py:eval_task`)
-- [ ] diff 在 `allowed_write_paths` 内 —— 你 (coordinator) 从 git diff 采集实际写入来核对 (采集与越界检测参考 `loop_engineering/scheduling/actual_writes.py:collect_actual_writes` 与同文件 `detect_out_of_bounds`); **越界写**标记并触发收口 diff 复核
+**任务自检**(每 task 交回时跑; 完整实现参考 `@e2e-loop/ssot/checklists` 的 `checkTask`):
+- [ ] 测试绿(角色自己跑的结果; 求值入口参考 `@e2e-loop/ssot/checklists` 的 `evalTask`)
+- [ ] diff 在 `allowed_write_paths` 内 —— 你 (coordinator) 从 git diff 采集实际写入来核对 (采集与越界检测参考 `@e2e-loop/shared` 的 `computeActualWrites` 与 `checkBoundary`); **越界写**标记并触发收口 diff 复核
 - [ ] 每个 `acceptance_refs` 有对应测试
 - [ ] 没动到其它 running task 的写路径
 
 过 → 置 complete,解锁下游;不过 → 退回同一角色修一次,仍不过升级给人。
 
-**计划修正快路径:** 实施角色发现某 planned 用例不可执行或本身错了 → 不要硬做,返回 `{ status:"plan-amendment-needed", reason, touched_acceptance_refs:[...] }`(**必须声明触及的 AC**),只回到 PLANNING 修受影响的部分,不重开整个计划。你据 `touched_acceptance_refs` 反查 AC↔task 映射做确定性回滚:与之相交的 complete task 降级待重验、running task 召回重派,不相交的不动 (AC↔task 索引构建参考 `loop_engineering/amendment/ac_index.py:build_ac_to_tasks`, 保守扩围规则参考 `loop_engineering/amendment/rollback.py:expand_acceptance_refs`);仅当改变验收语义才重新拍板,纯测试修正不惊动人。
+**计划修正快路径:** 实施角色发现某 planned 用例不可执行或本身错了 → 不要硬做,返回 `{ status:"plan-amendment-needed", reason, touched_acceptance_refs:[...] }`(**必须声明触及的 AC**),只回到 PLANNING 修受影响的部分,不重开整个计划。你据 `touched_acceptance_refs` 反查 AC↔task 映射做确定性回滚:与之相交的 complete task 降级待重验、running task 召回重派,不相交的不动 (AC↔task 索引构建参考 `@e2e-loop/ssot/amendment` 的 `buildAcToTasks`, 保守扩围规则参考同子包 `expandAcceptanceRefs`);仅当改变验收语义才重新拍板,纯测试修正不惊动人。
 
 ### 阶段 3 补充 · CLI 分发模式(真实 run, 非 dryrun)
 
@@ -221,11 +221,11 @@ worker **绝对不能写**(都是 Coordinator 单写者或阶段禁写):
 - 跑全部测试。
 - 解析各 task 的 `key-diffs.yaml`,汇总为 `wrap-up/key-diffs.md` 呈给人。
 
-**收口自检** (完整实现参考 `loop_engineering/checklists/wrap_up_check.py:check_wrap_up`):
+**收口自检** (完整实现参考 `@e2e-loop/ssot/checklists` 的 `checkWrapUp`):
 - [ ] 全部 task 测试绿
 - [ ] `key-diffs.md` 已生成,且你已把它整理好准备呈给人
 - [ ] scope 与计划一致(无计划外的大范围改动)
-- [ ] (多服务)所有契约的集成用例绿 (契约 diff 判定参考 `loop_engineering/multi_service/contracts_diff.py:diff_contracts`)
+- [ ] (多服务)所有契约的集成用例绿 (契约 diff 判定参考 `@e2e-loop/ssot/multi_service` 的 `diffContracts`)
 
 **→ 收口自动完成 / 条件验收:** 跑收口自检后, 若全部通过且无 risk:high / exclusive task, 直接 COMPLETE；若自检失败或存在 risk:high / exclusive task, 设置 `wrap_up_signoff`, 把 check-result 与 key-diffs 清单呈给人——**有 AskUserQuestion 工具则弹结构化提问框**(选项"接受 → COMPLETE / 退回 IMPLEMENTING 返工"),**无则文本提问**。
 
@@ -270,7 +270,7 @@ run-state.phase = COMPLETE。给人一个最终摘要,指向所有产物。
   "capabilities": {"git_diff": true, "fs_snapshot": true},
   "config": {"watchdog_timeout_min": {"simple":15,"medium":30,"complex":60}, "max_retries_per_task":1, "max_concurrency":4} }
 ```
-(Claude Code 环境下, `capabilities.git_diff` 通常可在 run 启动时探测为 true; 探测逻辑参考 `loop_engineering/scheduling/capabilities.py:probe_capabilities`.)
+(Claude Code 环境下, `capabilities.git_diff` 通常可在 run 启动时探测为 true; 探测逻辑参考 `@e2e-loop/ssot/scheduling` 的 `probeCapabilities`.)
 
 **task-plan.yaml:**
 ```yaml
@@ -323,9 +323,9 @@ runs/<run_id>/
    ① 权威 = `service-contracts.yaml` 的版本 diff(确定性,改契约必须先改此文件);
    ② 及早信号 = provider task 在 summary 自报 `contract_changes`;
    ③ 兜底 = consumer 的集成测试抓"改了代码却没改契约文件"的漂移。
-   **核心传播规则(契约是依赖边,不是裁判):** 改了某契约的 provider task → **所有 consume 它的 task 自动获得一条隐式依赖,标记需重新验证集成** (传播算法参考 `loop_engineering/multi_service/propagation.py:propagate_contract_changes` 与同文件 `apply_implicit_dependencies`).
+   **核心传播规则(契约是依赖边,不是裁判):** 改了某契约的 provider task → **所有 consume 它的 task 自动获得一条隐式依赖,标记需重新验证集成** (传播算法参考 `@e2e-loop/ssot/multi_service` 的 `propagateContractChanges` 与 `applyImplicitDependencies`).
 3. **两层测试:** 单测(单服务内部,task worker 跑)+ **集成测试**(跨服务契约+端到端,收口阶段跑,planning 期就挂在契约上设计)。集成测试是**测试,不是 reviewer**:跑绿即可,无独立重放、无对抗裁决。集成**红**通常不能归因到单个 task → 回 PLANNING 重审该契约、修订后重验所有 consumer,而非就近回某 task。
-4. (多 repo)加 `service → 物理树` 映射表 (解析参考 `loop_engineering/multi_service/service_map.py:resolve_worktree_for_task`),把每个 service 的写定位到正确仓库/工作树。
+4. (多 repo)加 `service → 物理树` 映射表 (解析参考 `@e2e-loop/ssot/multi_service` 的 `resolveWorktreeForTask`),把每个 service 的写定位到正确仓库/工作树。
 
 ## 11. 按需红队(非常驻)
 
@@ -335,7 +335,7 @@ runs/<run_id>/
 
 - `collaborative`(默认):上述全部。人在两点拍板。适合你自己/盯着的团队用。
 - `unattended`(无人值守、产出直达上线):增加"检测"——对关键命令独立复跑、关键 task 强制红队、收口加自动化全量回归。**升档只加检测,不改预防。**
-- **切到 unattended 前必须先做存在性校验:** 探测"独立复跑通道"是否就绪 (探测与切换门参考 `loop_engineering/trust_mode/gate.py:probe_unattended_readiness` 与同文件 `can_switch_to_unattended`);未就绪则**拒绝切换**并提示先补建,不要静默切到一个没有检测能力的假 unattended。
+- **切到 unattended 前必须先做存在性校验:** 探测"独立复跑通道"是否就绪 (探测与切换门参考 `@e2e-loop/ssot/trust_mode` 的 `probeUnattendedReadiness` 与 `canSwitchToUnattended`);未就绪则**拒绝切换**并提示先补建,不要静默切到一个没有检测能力的假 unattended。
 
 ## 13. 一次 run 的样子(让你快速上手)
 

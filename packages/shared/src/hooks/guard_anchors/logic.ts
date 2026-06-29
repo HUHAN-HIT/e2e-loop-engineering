@@ -7,9 +7,13 @@
  *   - human_pending ∈ {clarification, plan_signoff, wrap_up_signoff} → 放行 (合法人锚点)
  *   - CREATED / CLARIFYING → 放行 (允许 agent 推进到 PLANNING / PLANNING 锚点)
  *   - IMPLEMENTING → 活跃 task 必须 test-results.yaml 落盘且 tests_green=true
- *   - PLANNING / WRAPPING_UP → 跑客观自检 (P1 占位: 直接放行, P4 接入完整实现)
+ *   - PLANNING → 读 planning/plan-check-failures.json; 存在则 deny (上次 submitPlan 失败)
+ *   - WRAPPING_UP → 读 wrap-up/check-result.json; 任一 item 未 pass 则 deny
  *
- * 自检不过 → decision=deny; reason 含 "phase" 或 "tests_green"。
+ * Hook 不重跑 SSOT 算法 (避免循环依赖与重复计算), 只读 Coordinator 在 submitPlan /
+ * submitWrapUp 写下的"结果文件", 把它的结论转成 Stop hook 的 allow/deny 决策。
+ *
+ * 自检不过 → decision=deny; reason 含 "phase" 或失败项明细。
  *
  * 异常 fail-safe = deny (Python main except 分支), 但带上明确 reason。
  */
@@ -68,6 +72,108 @@ function readTestResultsGreen(p: string): boolean {
 interface PhaseCheck {
   ok: boolean;
   detail: string;
+}
+
+// plan-check-failures.json / wrap-up/check-result.json 的 item 结构 (Coordinator 写入)。
+interface CheckFileItem {
+  check: string;
+  passed: boolean;
+  detail: string;
+}
+
+/**
+ * 读 Coordinator 在 submitPlan 失败时写的 planning/plan-check-failures.json。
+ * 文件不存在 → null (submitPlan 还没跑过 / 上次通过了)。
+ */
+function readPlanCheckFailures(runDir: string): CheckFileItem[] | null {
+  const p = path.join(runDir, "planning", "plan-check-failures.json");
+  if (!fs.existsSync(p)) return null;
+  try {
+    const text = fs.readFileSync(p, "utf-8");
+    const data = JSON.parse(text) as unknown;
+    if (!Array.isArray(data)) return null;
+    return data.filter(
+      (x): x is CheckFileItem =>
+        typeof x === "object" &&
+        x !== null &&
+        typeof (x as CheckFileItem).check === "string" &&
+        typeof (x as CheckFileItem).passed === "boolean" &&
+        typeof (x as CheckFileItem).detail === "string",
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 读 Coordinator 在 submitWrapUp 写的 wrap-up/check-result.json。
+ * 文件不存在 → null (submitWrapUp 还没跑过)。
+ */
+function readWrapUpCheckResult(runDir: string): CheckFileItem[] | null {
+  const p = path.join(runDir, "wrap-up", "check-result.json");
+  if (!fs.existsSync(p)) return null;
+  try {
+    const text = fs.readFileSync(p, "utf-8");
+    const data = JSON.parse(text) as unknown;
+    if (!Array.isArray(data)) return null;
+    return data.filter(
+      (x): x is CheckFileItem =>
+        typeof x === "object" &&
+        x !== null &&
+        typeof (x as CheckFileItem).check === "string" &&
+        typeof (x as CheckFileItem).passed === "boolean" &&
+        typeof (x as CheckFileItem).detail === "string",
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PLANNING phase 自检: 检查 plan_check 是否失败过。
+ *
+ * 读 planning/plan-check-failures.json:
+ *   - 不存在 → submitPlan 还没跑过或上次通过了 → 软通过 (让 agent 推进到 plan_signoff)
+ *   - 存在且非空 → 上次 submitPlan 失败, 列出失败项 → deny
+ *   - 存在但为空 → 退化通过 (异常状态, 不锁死)
+ */
+function checkPlanningPhase(runDir: string): PhaseCheck {
+  const failures = readPlanCheckFailures(runDir);
+  if (failures === null) {
+    return { ok: true, detail: "planning/plan-check-failures.json 不存在 (plan_check 未失败或未跑)" };
+  }
+  if (failures.length === 0) {
+    return { ok: true, detail: "planning/plan-check-failures.json 为空" };
+  }
+  const lines = failures.map((f) => `  - ${f.check}: ${f.detail}`).join("\n");
+  return {
+    ok: false,
+    detail: `plan_check 失败 (${failures.length} 项):\n${lines}`,
+  };
+}
+
+/**
+ * WRAPPING_UP phase 自检: 检查 wrap_up_check 是否全 pass。
+ *
+ * 读 wrap-up/check-result.json:
+ *   - 不存在 → submitWrapUp 还没跑过 → 软通过 (异常路径, 通常 WRAPPING_UP 时已存在)
+ *   - 存在但任一 item passed=false → deny, 列出失败项
+ *   - 全 pass → 通过
+ */
+function checkWrappingUpPhase(runDir: string): PhaseCheck {
+  const items = readWrapUpCheckResult(runDir);
+  if (items === null) {
+    return { ok: true, detail: "wrap-up/check-result.json 不存在 (submitWrapUp 未跑)" };
+  }
+  const failed = items.filter((i) => !i.passed);
+  if (failed.length === 0) {
+    return { ok: true, detail: `wrap_up_check 全 pass (${items.length} 项)` };
+  }
+  const lines = failed.map((f) => `  - ${f.check}: ${f.detail}`).join("\n");
+  return {
+    ok: false,
+    detail: `wrap_up_check 未全 pass (${failed.length}/${items.length} 项失败):\n${lines}`,
+  };
 }
 
 /**
@@ -159,11 +265,10 @@ export async function handle(input: HookInput): Promise<HookOutput> {
     let check: PhaseCheck;
     if (phase === "IMPLEMENTING") {
       check = checkImplementingPhase(active.runDir);
-    } else if (phase === "PLANNING" || phase === "WRAPPING_UP") {
-      // P1 占位: plan_check / wrap_up_check 完整 TS 实现在 P4 接入;
-      // 当前直接放行, 但留 TODO 注释, 让 T5 测试可以标注 "P1 已知偏差"。
-      // TODO(P4): 接入 plan_check.ts / wrap_up_check.ts (与 Python checklists/* 行为对齐)
-      return passSilent();
+    } else if (phase === "PLANNING") {
+      check = checkPlanningPhase(active.runDir);
+    } else if (phase === "WRAPPING_UP") {
+      check = checkWrappingUpPhase(active.runDir);
     } else {
       // 未识别 phase (未来扩展): 退化放行
       return passSilent();
@@ -191,7 +296,9 @@ export async function handle(input: HookInput): Promise<HookOutput> {
  *   5. phase=IMPLEMENTING + 无 human_pending + 活跃 task test-results.yaml tests_green=true → allow
  *   6. phase=IMPLEMENTING + 无 human_pending + test-results.yaml 缺失 → deny; reason 含 "test-results.yaml" 和 "IMPLEMENTING"
  *   7. phase=IMPLEMENTING + 无 human_pending + tests_green=false → deny; reason 含 "tests_green"
- *   8. phase=PLANNING → allow (P1 占位; P4 接入 plan_check 后改为按自检结果判定)
- *   9. phase=WRAPPING_UP → allow (P1 占位; P4 接入 wrap_up_check 后改为按自检结果判定)
- *   10. 内部异常 → deny (fail-safe, 不锁死 agent 但提示有错)
+ *   8. phase=PLANNING + plan-check-failures.json 不存在 → allow (软通过)
+ *   9. phase=PLANNING + plan-check-failures.json 存在且非空 → deny; reason 含失败项 check 名
+ *   10. phase=WRAPPING_UP + check-result.json 全 pass → allow
+ *   11. phase=WRAPPING_UP + check-result.json 任一 fail → deny; reason 含失败项
+ *   12. 内部异常 → deny (fail-safe, 不锁死 agent 但提示有错)
  */

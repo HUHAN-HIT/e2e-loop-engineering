@@ -16,6 +16,8 @@
     "paths": {
       "@e2e-loop/shared": ["packages/shared/src/index.ts"],
       "@e2e-loop/adapter-claude-code": ["packages/adapter-cc/src/index.ts"],
+      "@e2e-loop/adapter-opencode": ["packages/adapter-oc/src/index.ts"],
+      "@e2e-loop/cli": ["packages/cli/src/index.ts"],
       "@e2e-loop/ssot": ["packages/ssot-ts/src/index.ts"],
       "@e2e-loop/ssot/runtime": ["packages/ssot-ts/src/runtime/index.ts"],
       "@e2e-loop/ssot/dispatch": ["packages/ssot-ts/src/dispatch/index.ts"],

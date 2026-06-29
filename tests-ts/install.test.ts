@@ -7,7 +7,9 @@
  *
  * 关键差异说明 (TS 端独有, 不算偏离权威):
  * - hooks 落盘为 .mjs (Node 运行时), Python 端为 .py; 这是 D-4 宿主选型决定的形态差异。
- * - settings.json 命令为 `node .claude/hooks/loop_engineering/<name>.mjs`。
+ * - settings.json 默认命令为 CLI 形式 `e2e-loop hook <dash-name>` (默认 CLI 注册模式;
+ *   修复 .mjs 在新 worktree 缺失导致 MODULE_NOT_FOUND 的隐患)。.mjs 文件仍照常落盘,
+ *   仅 `hookMode:"local"` 逃生舱才在 settings 里用本地 `node ... .mjs` 命令。
  *
  * 每个用例使用独立临时 projectDir (os.tmpdir() 下), 结束清理。
  */
@@ -136,9 +138,9 @@ test("install: 落盘布局完整 (settings/hooks×4/SKILL/standards/agents×4)"
 });
 
 // ---------------------------------------------------------------------------
-// 用例 2: settings.json 内容含 4 个 hook 注册, 命令为 node .claude/hooks/.../<name>.mjs
+// 用例 2: settings.json 内容含 4 个 hook 注册, 默认命令为 CLI 形式 e2e-loop hook <dash>
 // ---------------------------------------------------------------------------
-test("install: settings.json 含 4 个 hook 注册 (node ... .mjs 命令)", async () => {
+test("install: settings.json 含 4 个 hook 注册 (默认 CLI 命令 e2e-loop hook ...)", async () => {
   const projectDir = makeTmpProject();
   try {
     await claudeCodeAdapter.install({ projectDir, force: false });
@@ -146,13 +148,11 @@ test("install: settings.json 含 4 个 hook 注册 (node ... .mjs 命令)", asyn
     const cmds = allHookCommands(settings);
 
     for (const n of HOOK_NAMES) {
-      const expected = `node .claude/hooks/loop_engineering/${n}.mjs`;
+      const expected = `e2e-loop hook ${n.replaceAll("_", "-")}`;
       expect(cmds).toContain(expected);
     }
     // 恰好 4 条本工具 hook (无多余/无重复)
-    const ours = cmds.filter((c) =>
-      c.includes(".claude/hooks/loop_engineering/"),
-    );
+    const ours = cmds.filter((c) => c.startsWith("e2e-loop hook "));
     expect(ours.length).toBe(4);
   } finally {
     cleanup(projectDir);
@@ -180,7 +180,7 @@ test("install: 幂等 — 第二次 force:false 全部 skipped (含 settings.jso
     // settings.json 仍只有 4 条本工具 hook (未被重复注入)
     const cmds = allHookCommands(readSettings(projectDir));
     for (const n of HOOK_NAMES) {
-      const expected = `node .claude/hooks/loop_engineering/${n}.mjs`;
+      const expected = `e2e-loop hook ${n.replaceAll("_", "-")}`;
       expect(cmds.filter((c) => c === expected).length).toBe(1);
     }
   } finally {
@@ -258,13 +258,13 @@ test("install: settings.json 深合并 — 保留用户配置且并入 4 个 hoo
     const cmds = allHookCommands(merged);
     // 用户原有 hook 必须保留
     expect(cmds).toContain("echo user-hook");
-    // 本工具 4 个 hook 被并入
+    // 本工具 4 个 hook 被并入 (默认 CLI 命令)
     for (const n of HOOK_NAMES) {
-      expect(cmds).toContain(`node .claude/hooks/loop_engineering/${n}.mjs`);
+      expect(cmds).toContain(`e2e-loop hook ${n.replaceAll("_", "-")}`);
     }
     // 不重复: 每个本工具 hook 恰好 1 条
     for (const n of HOOK_NAMES) {
-      const expected = `node .claude/hooks/loop_engineering/${n}.mjs`;
+      const expected = `e2e-loop hook ${n.replaceAll("_", "-")}`;
       expect(cmds.filter((c) => c === expected).length).toBe(1);
     }
   } finally {
@@ -302,9 +302,7 @@ test("uninstall: 清掉 skills/agents×4/hooks + settings 内本工具 hooks 条
     const after = readSettings(projectDir);
     const cmds = allHookCommands(after);
     for (const n of HOOK_NAMES) {
-      expect(cmds).not.toContain(
-        `node .claude/hooks/loop_engineering/${n}.mjs`,
-      );
+      expect(cmds).not.toContain(`e2e-loop hook ${n.replaceAll("_", "-")}`);
     }
 
     // removedFiles 合理: 含本工具关键痕迹
@@ -353,9 +351,7 @@ test("uninstall: settings.json 保留用户自定义 hook 配置 (与 install me
     const cmdsBefore = allHookCommands(before);
     expect(cmdsBefore).toContain("echo user-hook");
     for (const n of HOOK_NAMES) {
-      expect(cmdsBefore).toContain(
-        `node .claude/hooks/loop_engineering/${n}.mjs`,
-      );
+      expect(cmdsBefore).toContain(`e2e-loop hook ${n.replaceAll("_", "-")}`);
     }
 
     await claudeCodeAdapter.uninstall!(projectDir);
@@ -368,9 +364,7 @@ test("uninstall: settings.json 保留用户自定义 hook 配置 (与 install me
     const cmdsAfter = allHookCommands(after);
     expect(cmdsAfter).toContain("echo user-hook");
     for (const n of HOOK_NAMES) {
-      expect(cmdsAfter).not.toContain(
-        `node .claude/hooks/loop_engineering/${n}.mjs`,
-      );
+      expect(cmdsAfter).not.toContain(`e2e-loop hook ${n.replaceAll("_", "-")}`);
     }
   } finally {
     cleanup(projectDir);

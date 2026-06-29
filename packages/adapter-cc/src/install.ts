@@ -44,9 +44,14 @@ function cloneJson<T>(value: T): T {
 }
 
 function resolveClaudeHookMode(ctx?: InstallContext): ClaudeHookMode {
-  if (ctx?.hookMode === "cli") return "cli";
-  if (ctx?.hookMode === "auto" && ctx.cliCommand) return "cli";
-  return "local";
+  // 决策 (2026-06-29): 默认 CLI 注册模式。本地 `node .claude/hooks/...mjs` 命令在新
+  // checkout 的 git worktree 里会因 .mjs 是 build 产物未随 commit 进库而 MODULE_NOT_FOUND
+  // 崩溃 (且崩在 hook try/catch 之前, fail-safe=deny 都来不及生效, 回合直接放行)。
+  // CLI 形式 `e2e-loop hook <name>` 无 per-worktree 文件依赖, 任何 worktree 都不受影响,
+  // 且走我们自己的 CLI, "找不到 run" 由代码主动判定而非进程崩溃。
+  // 显式 hookMode:"local" 保留为逃生舱 (仍可用照常落盘的 .mjs)。
+  if (ctx?.hookMode === "local") return "local";
+  return "cli";
 }
 
 function commandForHook(name: (typeof HOOK_NAMES)[number], ctx?: InstallContext): string {

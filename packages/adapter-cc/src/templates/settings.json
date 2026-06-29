@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/loop_engineering/probe_and_gate.mjs"
+            "command": "e2e-loop hook probe-and-gate"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/loop_engineering/guard_paths.mjs"
+            "command": "e2e-loop hook guard-paths"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/loop_engineering/post_task_collect.mjs"
+            "command": "e2e-loop hook post-task-collect"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/loop_engineering/guard_anchors.mjs"
+            "command": "e2e-loop hook guard-anchors"
           }
         ]
       }

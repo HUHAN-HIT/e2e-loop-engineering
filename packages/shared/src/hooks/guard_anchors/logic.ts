@@ -191,8 +191,37 @@ function checkImplementingPhase(
   }
   const task = findActiveTask(plan, state);
   if (task === null) {
-    // 没有 running 的 task, 可能是 task 间过渡 → 放行
-    return { ok: true, detail: "无 status=running 的 task (过渡态)" };
+    // 无 status=running 的活跃 task: 不能一律放行, 否则派发前/任务间空档想结束
+    // 回合时, 哪怕还有 pending task 也会被早停 → "还有活没干完就早停"。
+    // 统计剩余各状态 task, 据此判定是否到达合法停止边界。
+    const pending = plan.tasks.filter((t) => t.status === "pending");
+    const blocked = plan.tasks.filter((t) => t.status === "blocked");
+    if (pending.length > 0) {
+      // 还有 pending task 待推进 → 不是停止边界, 应继续 tick 派发。
+      const ids = pending
+        .slice(0, 3)
+        .map((t) => t.id)
+        .join(", ");
+      return {
+        ok: false,
+        detail:
+          `IMPLEMENTING 未完成: 还有 ${pending.length} 个 pending task 待推进 (${ids}); ` +
+          "应继续 tick 拿 ready frontier 派发, 不要结束回合。" +
+          "上下文压缩由 harness 处理, 不构成停止理由。",
+      };
+    }
+    if (blocked.length > 0) {
+      // 无 pending / 无 running, 但剩余 task 全部 blocked → 卡死状态, 需人介入。
+      const ids = blocked.map((t) => t.id).join(", ");
+      return {
+        ok: false,
+        detail:
+          `IMPLEMENTING: 剩余 ${blocked.length} 个 task 全部 blocked (${ids}); ` +
+          "请设置人锚点或转 ABORTED (带 reason), 不要静默结束回合。",
+      };
+    }
+    // 无 pending / 无 blocked / 无 running → 全部 complete, 合法边界, 放行 (可进 WRAPPING_UP)。
+    return { ok: true, detail: "所有 task 已 complete (可进 WRAPPING_UP)" };
   }
   const trPath = path.join(runDir, "tasks", task.id, "test-results.yaml");
   if (!fs.existsSync(trPath)) {
@@ -296,6 +325,9 @@ export async function handle(input: HookInput): Promise<HookOutput> {
  *   5. phase=IMPLEMENTING + 无 human_pending + 活跃 task test-results.yaml tests_green=true → allow
  *   6. phase=IMPLEMENTING + 无 human_pending + test-results.yaml 缺失 → deny; reason 含 "test-results.yaml" 和 "IMPLEMENTING"
  *   7. phase=IMPLEMENTING + 无 human_pending + tests_green=false → deny; reason 含 "tests_green"
+ *   8a. phase=IMPLEMENTING + 无 running task + 全部 task complete → allow (合法边界, 可进 WRAPPING_UP)
+ *   8b. phase=IMPLEMENTING + 无 running task + 存在 pending task → deny; reason 含 "pending" 和 "结束回合"
+ *   8c. phase=IMPLEMENTING + 无 running/pending + 剩余全 blocked → deny; reason 含 "blocked"
  *   8. phase=PLANNING + plan-check-failures.json 不存在 → allow (软通过)
  *   9. phase=PLANNING + plan-check-failures.json 存在且非空 → deny; reason 含失败项 check 名
  *   10. phase=WRAPPING_UP + check-result.json 全 pass → allow

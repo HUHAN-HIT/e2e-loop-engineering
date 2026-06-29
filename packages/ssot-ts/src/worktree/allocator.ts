@@ -126,9 +126,77 @@ function copyDirIfExists(src: string, dst: string): void {
   fs.cpSync(src, dst, { recursive: true, force: true });
 }
 
+/**
+ * 从 settings.json 的 hooks 结构里收集所有 command 字符串。
+ *
+ * 形状: `{ <Event>: [ { hooks: [ { command: string } ] } ] }`。任何层级缺失/类型不符都
+ * 静默跳过 (settings.json 可能是别的工具写的, 不归我们管)。
+ */
+function collectHookCommands(settings: unknown): string[] {
+  const commands: string[] = [];
+  if (typeof settings !== "object" || settings === null) return commands;
+  const hooks = (settings as Record<string, unknown>).hooks;
+  if (typeof hooks !== "object" || hooks === null) return commands;
+  for (const matchers of Object.values(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(matchers)) continue;
+    for (const matcher of matchers) {
+      if (typeof matcher !== "object" || matcher === null) continue;
+      const inner = (matcher as Record<string, unknown>).hooks;
+      if (!Array.isArray(inner)) continue;
+      for (const entry of inner) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const command = (entry as Record<string, unknown>).command;
+        if (typeof command === "string") commands.push(command);
+      }
+    }
+  }
+  return commands;
+}
+
+// 本地 .mjs 模式: command 内含 `.claude/hooks/loop_engineering/<name>.mjs` 相对路径。
+// CLI 模式 (形如 `e2e-loop hook <name>`) 不含此路径, 不被匹配, 因此天然跳过文件校验。
+const LOCAL_MJS_HOOK_RE = /(\.claude\/hooks\/loop_engineering\/[A-Za-z0-9_.-]+\.mjs)/;
+
+/**
+ * 校验 worktree 内 hook 装配一致性 (fail-closed)。
+ *
+ * 升级动机: 旧 `copyDirIfExists` 是盲拷贝 —— 源不存在就静默跳过, 会产出"settings.json 注册了
+ * hook 但 .mjs 缺失"的坏 worktree (hook 运行时 MODULE_NOT_FOUND 崩溃, 门失效)。这里在拷贝后
+ * 复核: 凡 settings.json 引用了本地 .mjs hook 但对应文件不在 worktree → throw 中止 allocation。
+ *
+ * 兼容性: settings.json 不存在/解析失败 → 直接 return (没装 loop, 不归我们管); CLI 模式命令
+ * (不含 .mjs 路径) → 跳过 (无 per-worktree 文件依赖)。
+ */
+function assertHookAssetsConsistent(worktreePath: string): void {
+  const settingsPath = path.join(worktreePath, ".claude", "settings.json");
+  if (!fs.existsSync(settingsPath)) return;
+
+  let settings: unknown;
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+  } catch {
+    // 解析失败不归我们管, 保持兼容, 不 throw。
+    return;
+  }
+
+  for (const command of collectHookCommands(settings)) {
+    const match = LOCAL_MJS_HOOK_RE.exec(command);
+    if (!match) continue; // 非本地 .mjs 模式 (CLI 模式等), 无文件依赖, 跳过。
+    const rel = match[1]!;
+    if (!fs.existsSync(path.join(worktreePath, rel))) {
+      throw new Error(
+        `worktree hook 装配不一致: settings.json 引用了 ${rel} 但文件缺失; ` +
+          `主仓可能未安装/构建 loop 资产(先跑 e2e-loop install --host cc),拒绝产出无门 worktree。`,
+      );
+    }
+  }
+}
+
 function syncProjectHookConfig(repoRoot: string, worktreePath: string): void {
   copyDirIfExists(path.join(repoRoot, ".claude"), path.join(worktreePath, ".claude"));
   copyDirIfExists(path.join(repoRoot, ".opencode"), path.join(worktreePath, ".opencode"));
+  // 拷贝完成后做 fail-closed 校验: 拒绝产出"注册了 hook 但 .mjs 缺失"的坏 worktree。
+  assertHookAssetsConsistent(worktreePath);
 }
 
 function makeBinding(fields: {

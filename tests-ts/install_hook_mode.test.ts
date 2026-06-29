@@ -55,6 +55,26 @@ test("Claude install: --hook-mode cli 渲染无宿主参数的 CLI hook 命令",
   }
 });
 
+test("Claude install: 显式 hookMode:local 逃生舱 — 渲染本地 node .mjs 命令", async () => {
+  const projectDir = makeTmpProject();
+  try {
+    await claudeCodeAdapter.install({
+      projectDir,
+      force: false,
+      hookMode: "local",
+    });
+
+    const cmds = allHookCommands(readSettings(projectDir));
+    for (const n of ["probe_and_gate", "guard_paths", "post_task_collect", "guard_anchors"]) {
+      expect(cmds).toContain(`node .claude/hooks/loop_engineering/${n}.mjs`);
+    }
+    // 默认 CLI 形式不应出现
+    expect(cmds.some((c) => c.startsWith("e2e-loop hook "))).toBe(false);
+  } finally {
+    cleanup(projectDir);
+  }
+});
+
 test("Claude install: local 与 cli 模式切换时不残留旧 Loop Engineering hook", async () => {
   const projectDir = makeTmpProject();
   try {

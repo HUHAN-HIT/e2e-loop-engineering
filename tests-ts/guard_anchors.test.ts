@@ -290,10 +290,11 @@ test("IMPLEMENTING + test-results.yaml 缺 tests_green 字段 → deny (解析�
 });
 
 // ---------------------------------------------------------------------------
-// 用例 8: IMPLEMENTING + 无 status=running 的 task (过渡态) → allow
+// 用例 8: IMPLEMENTING + 无 running task + 全部 task complete → allow
+// (合法边界: 所有 task 已完工, 可进 WRAPPING_UP)
 // ---------------------------------------------------------------------------
 
-test("IMPLEMENTING + 无 running task (过渡态) → allow", async () => {
+test("IMPLEMENTING + 无 running task + 全 complete → allow", async () => {
   const repoRoot = makeRepoRoot("transition");
   const planAllComplete =
     "schema: loop-engineering.task-plan.v2\n" +
@@ -321,6 +322,82 @@ test("IMPLEMENTING + 无 running task (过渡态) → allow", async () => {
 
   const out = await handleGuardAnchors(stopInput(repoRoot));
   expect(out.decision).toBe("allow");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 8b: IMPLEMENTING + 无 running task + 存在 pending task → deny
+// (派发前/任务间空档想结束回合: 还有活没干完, 不许早停)
+// ---------------------------------------------------------------------------
+
+test("IMPLEMENTING + 无 running task + 有 pending task → deny (未完工不许早停)", async () => {
+  const repoRoot = makeRepoRoot("pendingleft");
+  const planWithPending =
+    "schema: loop-engineering.task-plan.v2\n" +
+    "complexity: simple\n" +
+    "tasks:\n" +
+    "  - id: t1\n" +
+    "    title: todo task\n" +
+    "    allowed_write_paths:\n" +
+    "      - src/**\n" +
+    "    acceptance_refs:\n" +
+    "      - AC1\n" +
+    "    status: pending\n";
+  makeRun(
+    repoRoot,
+    "20260101-001",
+    {
+      run_id: "20260101-001",
+      phase: "IMPLEMENTING",
+      complexity: "simple",
+      trust_mode: "collaborative",
+      active_tasks: [],
+    },
+    planWithPending,
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("deny");
+  const reason = (out as { reason?: string }).reason ?? "";
+  // reason 应指出还有 pending task 待推进、不该结束回合
+  expect(reason).toContain("pending");
+  expect(reason).toContain("结束回合");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 8c: IMPLEMENTING + 无 running/pending task + 剩余全 blocked → deny
+// (全部卡死: 请设人锚点或转 ABORTED, 不许静默结束回合)
+// ---------------------------------------------------------------------------
+
+test("IMPLEMENTING + 无 running/pending + 剩余全 blocked → deny", async () => {
+  const repoRoot = makeRepoRoot("blockedleft");
+  const planWithBlocked =
+    "schema: loop-engineering.task-plan.v2\n" +
+    "complexity: simple\n" +
+    "tasks:\n" +
+    "  - id: t1\n" +
+    "    title: blocked task\n" +
+    "    allowed_write_paths:\n" +
+    "      - src/**\n" +
+    "    acceptance_refs:\n" +
+    "      - AC1\n" +
+    "    status: blocked\n";
+  makeRun(
+    repoRoot,
+    "20260101-001",
+    {
+      run_id: "20260101-001",
+      phase: "IMPLEMENTING",
+      complexity: "simple",
+      trust_mode: "collaborative",
+      active_tasks: [],
+    },
+    planWithBlocked,
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("deny");
+  const reason = (out as { reason?: string }).reason ?? "";
+  expect(reason).toContain("blocked");
 });
 
 // ---------------------------------------------------------------------------

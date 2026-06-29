@@ -185,6 +185,84 @@ test("[worktree allocator] adopt binds an existing same-repo worktree as unmanag
   expect(allocation.binding?.managed).toBe(false);
 });
 
+test("[worktree allocator] passes hook-asset consistency check when referenced .mjs exists", () => {
+  // 正向: 主仓 settings.json 注册了本地 .mjs hook 且对应文件齐全 → 拷进 worktree 后校验通过, 不抛。
+  const repo = makeTmp();
+  fs.writeFileSync(path.join(repo, ".gitignore"), ".worktrees/\n", "utf-8");
+
+  // 在主仓装好 loop 的 .claude 资产: settings.json 引用 guard_anchors.mjs, 且该 .mjs 真实存在。
+  const hooksDir = path.join(repo, ".claude", "hooks", "loop_engineering");
+  fs.mkdirSync(hooksDir, { recursive: true });
+  fs.writeFileSync(path.join(hooksDir, "guard_anchors.mjs"), "// 空 hook 占位\n", "utf-8");
+  fs.writeFileSync(
+    path.join(repo, ".claude", "settings.json"),
+    JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ command: "node .claude/hooks/loop_engineering/guard_anchors.mjs" }] },
+        ],
+      },
+    }),
+    "utf-8",
+  );
+
+  const { runner } = makeGitRunner({
+    "rev-parse --show-toplevel": repo,
+    "status --porcelain": "",
+  });
+
+  const allocation = allocateRunWorktree({
+    mode: "always",
+    repoCwd: repo,
+    runId: "20260628-006",
+    requirementSlug: "hooks consistent",
+    git: runner,
+  });
+
+  // 不抛, 且 worktree 内确实落了对应 .mjs。
+  expect(allocation.binding?.mode).toBe("created");
+  expect(
+    fs.existsSync(
+      path.join(allocation.workdir, ".claude", "hooks", "loop_engineering", "guard_anchors.mjs"),
+    ),
+  ).toBe(true);
+});
+
+test("[worktree allocator] fail-closed when settings.json references a missing .mjs hook", () => {
+  // fail-closed: 主仓 settings.json 引用 .mjs 但文件缺失 → 拷进 worktree 后校验失败 → 抛错, 拒绝产出无门 worktree。
+  const repo = makeTmp();
+  fs.writeFileSync(path.join(repo, ".gitignore"), ".worktrees/\n", "utf-8");
+
+  // 只写 settings.json (引用 guard_anchors.mjs), 故意不建对应 .mjs 文件。
+  fs.mkdirSync(path.join(repo, ".claude"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, ".claude", "settings.json"),
+    JSON.stringify({
+      hooks: {
+        Stop: [
+          { hooks: [{ command: "node .claude/hooks/loop_engineering/guard_anchors.mjs" }] },
+        ],
+      },
+    }),
+    "utf-8",
+  );
+
+  const { runner } = makeGitRunner({
+    "rev-parse --show-toplevel": repo,
+    "status --porcelain": "",
+  });
+
+  expect(() =>
+    allocateRunWorktree({
+      mode: "always",
+      repoCwd: repo,
+      runId: "20260628-007",
+      requirementSlug: "hooks missing",
+      git: runner,
+    }),
+  ).toThrow(/装配不一致|拒绝产出无门 worktree/);
+});
+
 test("[worktree cleanup] refuses unmanaged bindings", () => {
   const repo = makeTmp();
   const binding = {

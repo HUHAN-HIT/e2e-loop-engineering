@@ -20,6 +20,17 @@
 - **版本号对齐:** `core/manifest.json` 与本 changelog 由 `1.0.0-alpha` 提升为 `1.0.0`,
   与 5 个发布包的 package.json 版本一致。
 
+### 文档
+
+- **新增 Worktree-Only 隔离设计 spec (路 B):**
+  `docs/superpowers/specs/2026-06-29-worktree-only-isolation-design.md`。
+  针对"主工程已有与 e2e-loop 不兼容的 hook""孤儿 run 误伤日常开发"等问题, 确立
+  Claude Code 宿主下的默认形态——每个 run 绑定专属一次性 worktree、coordinator 会话
+  只在 worktree 内运行、worktree 内只装 e2e-loop-only 资产。含三处核心改动
+  (syncProjectHookConfig 装 e2e-loop-only / probe_and_gate SessionStart enforcement /
+  "一 worktree 一 run" 机械校验)、待拍板决策点 (enforcement 默认 warn 可配 deny)、
+  测试覆盖与验收标准。本条仅登记设计文档产出, 实施代码改动另行登记。
+
 ## 1.0.0-alpha (2026-06-29)
 
 本版本为 Python SSOT 物理移除后的收口版本, 主要完成"文档与代码对齐 TS SSOT"的扫尾工作。

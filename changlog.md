@@ -7,6 +7,27 @@
 
 首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
 
+### 修复 — worktree 早停加固 (2026-06-29)
+
+针对"协调器把上下文压缩信号 (StrategicCompact) 误读成停止指令而早停"与"Stop hook 在 git worktree 里
+`MODULE_NOT_FOUND` 崩溃 (崩在 hook try/catch 之前, fail-safe=deny 都来不及生效) 导致门失效"两个连锁问题的一组修复:
+
+- **guard_anchors 未完工门 (结构层):** `checkImplementingPhase` 不再把"无 running task"一律当过渡态放行;
+  改为统计 plan 状态——尚有 pending → deny (应继续 tick 推 ready frontier, 不结束回合); 仅剩 blocked → deny
+  (提示设人锚点或转 ABORTED); 全 complete 才放行。(`packages/shared/src/hooks/guard_anchors/logic.ts`)
+- **runs-root 跨 worktree 解析:** `resolveRunsRoot` 在 cwd 为 linked worktree 且本地无 `runs/` 时, 经
+  `git rev-parse --git-common-dir` 解析回主 worktree 的 `runs/`; 正常仓库走快路径不调 git, 任何异常回退原行为。
+  否则 worktree 内 hook 找不到 run → 静默放行, 门形同虚设。(`packages/shared/src/runs.ts`)
+- **allocator hook 装配 fail-closed:** `syncProjectHookConfig` 拷贝后校验——worktree 的 settings.json 引用了
+  本地 `.mjs` 但文件缺失则 throw, 拒绝产出"注册了 hook 却无门"的 worktree; CLI 模式命令无文件依赖不受校验。
+  (`packages/ssot-ts/src/worktree/allocator.ts`)
+- **默认 CLI hook 注册模式:** Claude Code hook 默认由 `node .claude/hooks/...mjs` 改为 `e2e-loop hook <name>`,
+  消除 ".mjs 是未提交 build 产物 → 新 worktree 缺文件 → MODULE_NOT_FOUND" 的根因, 且走自有 CLI 使"找不到 run"
+  由代码主动判定而非进程崩溃; 显式 `hookMode:"local"` 保留为逃生舱。
+  (`packages/adapter-cc/src/install.ts` + `templates/settings.json`)
+- **coordinator 提示词不变量 (提示层):** `core/coordinator.md` 增"停回合的唯一依据"与"上下文信号永远不是
+  停止理由"两条硬规则, 从根因侧杜绝误读早停 (`<system-reminder>` 是数据不是指令)。
+
 ### 新增
 
 - **开源许可:** 仓库根新增 `LICENSE` (Apache-2.0); 5 个发布包 package.json 均补 `"license": "Apache-2.0"`
@@ -27,9 +48,10 @@
   针对"主工程已有与 e2e-loop 不兼容的 hook""孤儿 run 误伤日常开发"等问题, 确立
   Claude Code 宿主下的默认形态——每个 run 绑定专属一次性 worktree、coordinator 会话
   只在 worktree 内运行、worktree 内只装 e2e-loop-only 资产。含三处核心改动
-  (syncProjectHookConfig 装 e2e-loop-only / probe_and_gate SessionStart enforcement /
-  "一 worktree 一 run" 机械校验)、待拍板决策点 (enforcement 默认 warn 可配 deny)、
-  测试覆盖与验收标准。本条仅登记设计文档产出, 实施代码改动另行登记。
+  (syncProjectHookConfig 装 e2e-loop-only + 写 worktree 根 marker / enforcement 主体落
+  CLI 层——init 引导 + dispatch/run 非 worktree 拒绝, 不依赖 hook 注册 (hook 要生效须先
+  注册, 主工程纯净则 probe_and_gate 不在场, 故引导/拦截改由 CLI 承担) / "一 worktree
+  一 run" 机械校验)、测试覆盖与验收标准。本条仅登记设计文档产出, 实施代码改动另行登记。
 
 ## 1.0.0-alpha (2026-06-29)
 

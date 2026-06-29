@@ -6,7 +6,7 @@
 
 | 层 | 路径 | 职责 |
 | --- | --- | --- |
-| **skill (协调器提示词)** | `.claude/skills/loop-engineering/SKILL.md` | 主 agent 加载后即 coordinator, 推状态机、跑客观自检、在两个锚点交还给人 |
+| **skill (协调器提示词)** | `.claude/skills/loop-engineering/SKILL.md` | 主 agent 加载后即 coordinator, 推状态机、跑客观自检、计划必停人且收口异常/高风险才停人 |
 | **craft 标准层** | `.claude/skills/loop-engineering/standards/*.md` | 各阶段"怎么做才算好"的判据/正反例/样例; 由 SKILL.md 与各子 agent 一行指针按需引用 |
 | **subagents (4 个角色)** | `.claude/agents/*.md` | 由主 agent 通过 Task 工具按阶段分发, 隔离上下文产出 worker 产物 |
 | **Python 算法 SSOT** | 已安装包中的 `loop_engineering/` | 协作式判断原语的可执行参考库 (路径相交 / checks 文法 / 保守扩围 / 契约 diff 等) |
@@ -48,10 +48,10 @@
 4. 按 DAG ready_frontier 分发 implementation-worker (并行/串行由冲突检测定)
    → 收回 test-results/summary/key-diffs → 任务自检 → 解锁下游
 5. (按需) risk:high task 收口前分发 red-team-reviewer
-6. 汇总 key-diffs → 收口自检 → 呈人 wrap_up_signoff → COMPLETE
+6. 汇总 key-diffs → 收口自检；普通全绿自动 COMPLETE，失败/risk:high/exclusive 才设置 wrap_up_signoff
 ```
 
-两个锚点 (`plan_signoff` / `wrap_up_signoff`) 是**仅有的**让人停下确认的点; 其余环节自动.
+`plan_signoff` 是必经人锚点；`wrap_up_signoff` 是条件锚点，仅收口异常或高风险时让人停下确认。其余环节自动。
 
 ## Python 包何时被引用、何时不会被调用
 

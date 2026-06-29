@@ -3,7 +3,7 @@
  *
  * 规范源: design §1 与 §6。
  *
- * 三类人盯点: clarification / plan_signoff / wrap_up_signoff。
+ * 两类合法人锚点: plan_signoff / wrap_up_signoff。wrap_up_signoff 是条件锚点, 仅异常/高风险收口时设置。
  * 状态机只校验 anchor 与当前 phase 的合法性, 不负责通知或超时。
  *
  * 与 Python 的差异处理:
@@ -34,7 +34,7 @@ export class InvalidHumanAnchorError extends Error {
 
 /**
  * design §1: 每个 anchor 只在特定 phase 合法。
- * 方法论演进 (2026-06-28): 删除 clarification 锚点 (澄清不再单独停人)。
+ * 方法论演进 (2026-06-28): 删除 clarification 锚点; wrap_up_signoff 从必经锚点改为条件锚点。
  */
 const ANCHOR_ALLOWED_PHASES: Readonly<Record<HumanPendingType, ReadonlySet<Phase>>> = {
   [HumanPending.plan_signoff]: new Set<Phase>([Phase.PLANNING]),

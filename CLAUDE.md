@@ -68,7 +68,7 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 任意 phase → ABORTED (必须给 reason)
 ```
 
-合法迁移矩阵见 `loop_engineering/state_machine/transitions.py:LEGAL_TRANSITIONS`。task 级四态 `pending/running/blocked/complete` 由 scheduling 维护, 不在 state_machine。两个**人盯锚点** (run 唯一停下等人的点): `plan_signoff` 与 `wrap_up_signoff`; 详见 `state_machine/human_anchors.py`。
+合法迁移矩阵见 `loop_engineering/state_machine/transitions.py:LEGAL_TRANSITIONS`。task 级四态 `pending/running/blocked/complete` 由 scheduling 维护, 不在 state_machine。**人盯锚点**: `plan_signoff` 为必经计划拍板; `wrap_up_signoff` 仅在收口自检失败、risk:high 或 exclusive task 时设置; 详见 `state_machine/human_anchors.py`。
 
 ### 单 tick 顺序 (严格固定, design §3.7)
 

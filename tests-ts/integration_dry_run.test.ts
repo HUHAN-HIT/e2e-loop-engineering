@@ -140,22 +140,18 @@ test("[py: test_end_to_end_simple_run] CREATED→PLANNING→IMPLEMENTING→WRAPP
   expect(coord.state.phase).toBe(Phase.IMPLEMENTING);
   expect(coord.state.human_pending ?? null).toBeNull();
 
-  // 3. 跑 tick 循环 → task complete + 自动进 WRAPPING_UP
+  // 3. 跑 tick 循环 → task complete + 普通全绿自动直达 COMPLETE (无 wrap_up_signoff)
   coord.runUntilHumanOrTerminal(10);
   expect(coord.plan).not.toBeNull();
   expect(coord.plan!.tasks[0]!.status).toBe("complete");
-  expect(coord.state.phase).toBe(Phase.WRAPPING_UP);
-  expect(coord.state.human_pending).toBe(HumanPending.wrap_up_signoff);
+  expect(coord.state.phase).toBe(Phase.COMPLETE);
+  expect(coord.state.human_pending ?? null).toBeNull();
 
-  // 4. 收口自检通过 → check-result.json 含 all_tasks_tests_green
+  // 4. 收口自检仍跑 → check-result.json 含 all_tasks_tests_green
   const result = fs.readFileSync(path.join(runDir, "wrap-up", "check-result.json"), "utf-8");
   expect(result).toContain("all_tasks_tests_green");
 
-  // 5. signoff_wrap_up → COMPLETE
-  coord.signoffWrapUp(true);
-  expect(coord.state.phase).toBe(Phase.COMPLETE);
-
-  // 6. run-state.json 持久化为 COMPLETE
+  // 5. run-state.json 持久化为 COMPLETE
   const persisted = readRunState(runDir);
   expect(persisted.phase).toBe(Phase.COMPLETE);
 
@@ -381,6 +377,9 @@ test("[CLI 入口端到端] node 跑 dist/index.js: init→plan→signoff-plan�
     // status → 经 CLI 入口可读回 phase
     const statusOut = run("status", runId);
     expect(statusOut).toContain("phase: IMPLEMENTING");
+    expect(statusOut).toContain("navigation_map:");
+    expect(statusOut).toContain("IMPLEMENTING:");
+    expect(statusOut).toContain("next_action:");
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }

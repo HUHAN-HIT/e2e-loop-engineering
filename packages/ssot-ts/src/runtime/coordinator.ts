@@ -45,7 +45,7 @@ import { HumanPending, Phase } from "../schema/run_state.js";
 import type { RunCapabilities, RunState } from "../schema/run_state.js";
 import { parseServiceContracts } from "../schema/service_contracts.js";
 import type { ServiceContracts } from "../schema/service_contracts.js";
-import { TaskStatus } from "../schema/task_plan.js";
+import { RiskLevel, TaskStatus } from "../schema/task_plan.js";
 import type { TaskPlan } from "../schema/task_plan.js";
 import {
   clearHumanPending,
@@ -381,7 +381,7 @@ export class Coordinator {
     }
   }
 
-  /** → WRAPPING_UP, 跑收口自检, set human_pending=wrap_up_signoff。 */
+  /** → WRAPPING_UP, 跑收口自检; 普通全绿自动 COMPLETE, 异常/高风险才停人。 */
   submitWrapUp(): void {
     if (this.state.phase !== Phase.IMPLEMENTING) {
       throw new Error(
@@ -424,14 +424,21 @@ export class Coordinator {
     }));
     fs.writeFileSync(checkPath, `${JSON.stringify(items, null, 2)}`, "utf-8");
 
-    // 不论通过与否, 都 set human_pending=wrap_up_signoff, 让 runUntilHumanOrTerminal 退出循环
-    // (§A4 修复: 失败时若不设 anchor, tick 会空转直到 max_ticks hang)。
-    this.state = setHumanPending(this.state, HumanPending.wrap_up_signoff);
+    const hasManualWrapUpTask = this.plan.tasks.some(
+      (t) => t.risk === RiskLevel.high || t.exclusive,
+    );
+    if (!result.all_pass || hasManualWrapUpTask) {
+      // 失败时必须停人, 否则 tick 会空转; 高风险/独占任务也保留收口锚点供红队材料与人验收。
+      this.state = setHumanPending(this.state, HumanPending.wrap_up_signoff);
+      this.refreshStateFile();
+      return;
+    }
+
+    this.state = advancePhase(this.state, Phase.COMPLETE);
     this.refreshStateFile();
   }
-
   /**
-   * 人盯点 2. accepted=true → → COMPLETE; false → 回 IMPLEMENTING。
+   * 条件收口签收. accepted=true → COMPLETE; false → 回 IMPLEMENTING。
    *
    * §A4 修复: accepted=true 时强制读 wrap-up/check-result.json 校验全 pass; 未通过拒绝签收。
    */

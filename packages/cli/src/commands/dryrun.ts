@@ -25,6 +25,7 @@ import * as path from "node:path";
 
 import {
   Coordinator,
+  buildNavigationMap,
   initRunDir,
   nextRunId,
   readRunState,
@@ -88,6 +89,33 @@ function positional(args: Args, idx: number): string | undefined {
 /** human_pending 的展示文本 (null → "(none)")。 */
 function humanPendingText(hp: string | null | undefined): string {
   return hp ?? "(none)";
+}
+
+/**
+ * 把只读导航图投影渲染成紧凑的多行文本 (供 status 输出)。
+ *
+ * 只读展示层: 不改任何状态; 证据路径直接透传投影里的相对路径 (正斜杠), 指向事实源文件。
+ */
+function renderNavigationMap(
+  map: ReturnType<typeof buildNavigationMap>,
+): string {
+  const lines: string[] = [];
+  lines.push("navigation_map:");
+  for (const p of map.phases) {
+    const evidence =
+      p.evidence_paths.length > 0 ? ` evidence=${JSON.stringify(p.evidence_paths)}` : "";
+    lines.push(`  - ${p.phase}: ${p.status} - ${p.detail}${evidence}`);
+  }
+  if (map.blocker !== null) {
+    lines.push(`blocker: ${map.blocker.kind} - ${map.blocker.reason}`);
+    if (map.blocker.evidence_paths.length > 0) {
+      lines.push(`blocker_evidence: ${JSON.stringify(map.blocker.evidence_paths)}`);
+    }
+  } else {
+    lines.push("blocker: (none)");
+  }
+  lines.push(`next_action: ${map.next_action}`);
+  return `${lines.join("\n")}\n`;
 }
 
 /** 把字符串解析为整数, 失败回退默认值。 */
@@ -211,6 +239,16 @@ export function runStatus(args: Args): number {
     process.stdout.write(`aborted_at: ${state.aborted_at}\n`);
     process.stdout.write(`aborted_reason: ${state.aborted_reason}\n`);
   }
+  let plan = null;
+  const planPath = path.join(runDir, "planning", "task-plan.yaml");
+  if (fs.existsSync(planPath)) {
+    try {
+      plan = readTaskPlan(planPath);
+    } catch {
+      plan = null;
+    }
+  }
+  process.stdout.write(renderNavigationMap(buildNavigationMap(runDir, state, plan)));
   return 0;
 }
 
@@ -367,7 +405,7 @@ export function runSignoffPlan(args: Args): number {
 // ---------------------------------------------------------------------------
 
 /**
- * signoff-wrap-up 子命令 (人盯点 2)。
+ * signoff-wrap-up 子命令 (条件收口签收)。
  *
  * 用法: e2e-loop signoff-wrap-up <run_id> [--reject] [--runs-root <dir>]
  */

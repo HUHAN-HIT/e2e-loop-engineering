@@ -14,3 +14,4 @@ export * from "./directory.js";
 export * from "./yaml_io.js";
 export * from "./tick.js";
 export * from "./coordinator.js";
+export * from "./navigation_map.js";

@@ -48,7 +48,6 @@ import {
 } from "../../packages/ssot-ts/src/dispatch/index.js";
 import type { WorkerOutcome } from "../../packages/ssot-ts/src/dispatch/index.js";
 import {
-  HumanPending,
   Phase,
   parseRunState,
 } from "../../packages/ssot-ts/src/schema/run_state.js";
@@ -137,6 +136,21 @@ function writeSummary(runDir: string, taskId: string, text = "done"): void {
   const dir = path.join(runDir, "tasks", taskId);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "summary.md"), text, "utf-8");
+}
+
+/** 写 tasks/<tid>/key-diffs.yaml (minimal non-empty)。 */
+function writeKeyDiffs(runDir: string, taskId: string): void {
+  const dir = path.join(runDir, "tasks", taskId);
+  fs.mkdirSync(dir, { recursive: true });
+  const yaml = `schema: loop-engineering.key-diffs.v1
+task_id: ${taskId}
+key_diffs:
+  - file: src/x.ts
+    change: add x
+    why: for AC
+    risk: low
+`;
+  fs.writeFileSync(path.join(dir, "key-diffs.yaml"), yaml, "utf-8");
 }
 
 /**
@@ -257,6 +271,7 @@ test("[collect] 通过路径: artifact 全齐 → status→complete + 落 key-di
   // 模拟子 agent 落 artifact
   writeTestResults(runDir, "T01", { caseId: "t_happy" });
   writeSummary(runDir, "T01", "T01 实现完成");
+  writeKeyDiffs(runDir, "T01");
 
   const result = coord.collectTaskOutcome("T01");
 
@@ -276,10 +291,10 @@ test("[collect] 通过路径: artifact 全齐 → status→complete + 落 key-di
   // caps 全 false → source=worker_self_report, writes 为空
   expect(aw!.source).toBe("worker_self_report");
 
-  // all_complete=true → 自动 submitWrapUp → phase=WRAPPING_UP + human_pending=wrap_up_signoff
+  // all_complete=true → 普通全绿收口自动 COMPLETE, 不再等待 wrap_up_signoff。
   expect(result.all_complete).toBe(true);
-  expect(coord.state.phase).toBe(Phase.WRAPPING_UP);
-  expect(coord.state.human_pending).toBe(HumanPending.wrap_up_signoff);
+  expect(coord.state.phase).toBe(Phase.COMPLETE);
+  expect(coord.state.human_pending ?? null).toBeNull();
 });
 
 // ---------------------------------------------------------------------------

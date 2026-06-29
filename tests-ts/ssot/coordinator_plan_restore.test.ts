@@ -41,7 +41,7 @@ function noopWorker(): WorkerOutcome {
 }
 
 /** 构造 minimal plan: 1 task, 1 AC, 1 happy-path test。 */
-function simplePlan(opts?: { riskHigh?: boolean; withTests?: boolean }): TaskPlan {
+function simplePlan(opts?: { riskHigh?: boolean; exclusive?: boolean; withTests?: boolean }): TaskPlan {
   const riskHigh = opts?.riskHigh ?? false;
   const withTests = opts?.withTests ?? true;
   return parseTaskPlan({
@@ -53,6 +53,7 @@ function simplePlan(opts?: { riskHigh?: boolean; withTests?: boolean }): TaskPla
         allowed_write_paths: ["src/**"],
         acceptance_refs: ["AC-001"],
         depends_on: [],
+        exclusive: opts?.exclusive ?? false,
         risk: riskHigh ? "high" : "normal",
         tests: withTests
           ? [{ id: "t1_happy", scenario: "happy path", checks: ["passed == true"] }]
@@ -147,20 +148,17 @@ test("[py: test_end_to_end_simple_run] CREATED→PLANNING→IMPLEMENTING→WRAPP
 
   expect(coord.plan).not.toBeNull();
   expect(coord.plan!.tasks[0]!.status).toBe("complete");
-  expect(coord.state.phase).toBe(Phase.WRAPPING_UP);
-  expect(coord.state.human_pending).toBe(HumanPending.wrap_up_signoff);
+  expect(coord.state.phase).toBe(Phase.COMPLETE);
+  expect(coord.state.human_pending ?? null).toBeNull();
 
   // 4. 收口自检通过, check-result.json 含 all_tasks_tests_green
   const result = fs.readFileSync(path.join(runDir, "wrap-up", "check-result.json"), "utf-8");
   expect(result).toContain("all_tasks_tests_green");
 
-  // 5. signoff_wrap_up → COMPLETE
-  coord.signoffWrapUp(true);
-  expect(coord.state.phase).toBe(Phase.COMPLETE);
-
-  // 6. run-state.json 持久化为 COMPLETE
+  // 5. 普通全绿 run 自动 COMPLETE, 不再等待 wrap_up_signoff。
   const persisted = readRunState(runDir);
   expect(persisted.phase).toBe(Phase.COMPLETE);
+  expect(persisted.human_pending ?? null).toBeNull();
 });
 
 // ---------------------------------------------------------------------------
@@ -252,6 +250,46 @@ test("[py: test_hard_gate_task_missing_key_diffs_blocks_complete] risk:high 缺 
   expect(() => coord.signoffWrapUp(true)).toThrow();
 });
 
+test("risk:high 有 key-diffs 且收口自检通过 → 保留 wrap_up_signoff, 不自动 COMPLETE", () => {
+  const runsRoot = path.join(makeTmp(), "runs");
+  const runId = "20260627-high-review";
+  const runDir = initRunDir(runsRoot, runId, "test high risk");
+  writeRunState(runDir, parseRunState({ run_id: runId, complexity: "simple", phase: Phase.CREATED }));
+
+  const runner = new RecordingWorkerRunner([completedOutcome(true)]);
+  const coord = new Coordinator(runDir, runner);
+  coord.startPlanning();
+  coord.submitPlan(simplePlan({ riskHigh: true }));
+  coord.signoffPlan(true);
+
+  coord.runUntilHumanOrTerminal(10);
+
+  expect(coord.state.phase).toBe(Phase.WRAPPING_UP);
+  expect(coord.state.human_pending).toBe(HumanPending.wrap_up_signoff);
+
+  const result = fs.readFileSync(path.join(runDir, "wrap-up", "check-result.json"), "utf-8");
+  const items = JSON.parse(result) as Array<{ check: string; passed: boolean }>;
+  expect(items.every((i) => i.passed)).toBe(true);
+});
+
+test("exclusive task 有 key-diffs 且收口自检通过 → 保留 wrap_up_signoff, 不自动 COMPLETE", () => {
+  const runsRoot = path.join(makeTmp(), "runs");
+  const runId = "20260627-exclusive-review";
+  const runDir = initRunDir(runsRoot, runId, "test exclusive");
+  writeRunState(runDir, parseRunState({ run_id: runId, complexity: "simple", phase: Phase.CREATED }));
+
+  const runner = new RecordingWorkerRunner([completedOutcome(true)]);
+  const coord = new Coordinator(runDir, runner);
+  coord.startPlanning();
+  coord.submitPlan(simplePlan({ exclusive: true }));
+  coord.signoffPlan(true);
+
+  coord.runUntilHumanOrTerminal(10);
+
+  expect(coord.state.phase).toBe(Phase.WRAPPING_UP);
+  expect(coord.state.human_pending).toBe(HumanPending.wrap_up_signoff);
+});
+
 // ---------------------------------------------------------------------------
 // 单写者持久化: tick 后 plan 落盘且可被新 Coordinator 读回
 // ---------------------------------------------------------------------------
@@ -273,7 +311,7 @@ test("[新增] 单写者持久化: tick 后 task-plan.yaml 落盘, 新 Coordinat
   const coord2 = new Coordinator(runDir, new RecordingWorkerRunner([]));
   expect(coord2.plan).not.toBeNull();
   expect(coord2.plan!.tasks[0]!.status).toBe("complete");
-  expect(coord2.state.phase).toBe(Phase.WRAPPING_UP);
+  expect(coord2.state.phase).toBe(Phase.COMPLETE);
 
   // 落盘的 run-state.json 不含 null 字段 (exclude_none 对齐)。
   const raw = fs.readFileSync(path.join(runDir, "run-state.json"), "utf-8");

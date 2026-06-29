@@ -66,10 +66,11 @@ export type TrustMode = z.infer<typeof TrustModeSchema>;
 
 /**
  * 人介入时机 (design §1, §6)。
- * null 表示无需人介入, 系统自动推进; 两类非空值分别对应两个人盯点。
+ * null 表示无需人介入, 系统自动推进; 非空值表示当前需要人介入。
  *
  * 注: 历史上曾有第三个值 `clarification` (澄清独立停顿)。方法论演进 (2026-06-28):
  * 澄清不再单独停人——带默认直进 PLANNING, 问题在 plan 签署时一并呈现, 故删除该锚点。
+ * wrap_up_signoff 仍是合法锚点, 但仅在收口自检失败或 task risk:high/exclusive 时设置; 普通全绿 run 自动 COMPLETE。
  * (此处 TS 已不再与归档 Python 的 HumanPending 等价, 是有意的演进而非端口缺陷。)
  */
 export const HumanPending = {

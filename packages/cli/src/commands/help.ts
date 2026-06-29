@@ -24,7 +24,7 @@ export function printHelp(stream: NodeJS.WriteStream = process.stdout): void {
   run              IMPLEMENTING tick 循环, 跑到等人或终态
   wrap-up          WRAPPING_UP 收口自检
   signoff-plan     人盯点 1: 接受 / 拒绝计划
-  signoff-wrap-up  人盯点 2: 接受 / 拒绝收口
+  signoff-wrap-up  条件收口签收: 接受 / 拒绝异常或高风险收口
   abort            任意 phase → ABORTED (必须给 --reason)
   amend            处理 plan-amendment (回滚触及 AC 的 task, 回 PLANNING)
 

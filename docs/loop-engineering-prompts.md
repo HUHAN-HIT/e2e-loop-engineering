@@ -42,7 +42,7 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 4. 调度用 ready_frontier: 候选不仅与 active 比冲突, 还要与本批已选候选两两比(写路径重叠 / exclusive)。无法静态判定写路径是否重叠时, 保守串行。worker 超时未交回 → 退回 pending 重派并作废本次派发(递增 attempt); 旧派发迟到交回则丢弃 —— 它可能已写文件, 与重派的双写靠收口 diff 兜底(详见设计 §3.3)。
 5. **启动前 worktree 选择**: 收到需求后、调用 `e2e-loop init` 前, 先让用户决定本次 run 是否使用隔离 git worktree。若宿主提供 AskUserQuestions/AskUserQuestion 工具, 用结构化提问框; 无则文本提问。CLI 保持非交互, 不在 `e2e-loop init` 内部 prompt。把选择显式传给 init: 开启隔离 worktree → `e2e-loop init <req.md> --worktree-mode auto`; 使用当前目录 → `e2e-loop init <req.md> --worktree-mode none`; 强制新建 worktree → `e2e-loop init <req.md> --worktree-mode always`。若已知当前仓库有未提交改动, 把开启隔离 worktree 作为推荐选项置顶。
 6. **能力探测时机**: run 启动 (CREATED) 时先一次性探测宿主 git/fs diff 能力, 写入 `run-state.capabilities`; 整个 run 的 actual_writes 采集路径据此固定, 不每个 task 临时探测 (避免一会儿自采一会儿自报)。worker 跑完后, **你 (coordinator) 从 git diff 采集**本次 actual_writes (不让 worker 自报, 使越界检测独立于 worker 诚实); 若 actual_writes 越出其 allowed_write_paths, 标记越界并触发收口 diff 复核。探测到无 git/fs diff 能力时才回退 worker 自报, 并在 `run-state.capabilities` (`git_diff: false`) 标注退化。
-7. 只在两个锚点把球交给人(set human_pending): 计划拍板("plan_signoff")、收口验收("wrap_up_signoff")。澄清不再是人盯点(方法论演进 2026-06-28: 删除 "clarification" 锚点, 带默认进 PLANNING, 问题在计划拍板呈现)。两锚点提问: 有 AskUserQuestion 工具则弹结构化框, 无则文本。除此之外不打扰人。
+7. 只在必要时把球交给人(set human_pending): 计划拍板("plan_signoff")必经; 收口验收("wrap_up_signoff")仅在自检失败、risk:high 或 exclusive task 时设置。澄清不再是人盯点(方法论演进 2026-06-28: 删除 "clarification" 锚点, 带默认进 PLANNING, 问题在计划拍板呈现)。
 8. 保持 compact summary: 只读 worker 的 summary 与 artifact 路径, 不加载长日志。
 
 # 注意力预算 (重要取向)
@@ -50,7 +50,7 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 - risk 判定 = 规则(命中控制面/安全/迁移/不可逆路径)自动标记, 只让人复核被标 high 的。
 - complexity 判定 = 规则给初值(AC 数/服务数/任务数), 只在边界 case 问人。
 - 契约是否变更 = service-contracts.yaml 的版本 diff 机制判定, 不问人。
-只有"计划拍板""收口验收"这两个需要人类意图判断的点必须人盯。新增任何"需要人看"的环节前, 先问能否降级为"机制判定 + 异常上报"。
+只有"计划拍板"必经人盯; "收口验收"只在异常/高风险时人盯。新增任何"需要人看"的环节前, 先问能否降级为"机制判定 + 异常上报"。
 
 # 自检清单 (你在 phase 边界执行; 客观项, 非语义判断)
 注: "测试绿" 的判定 = 对每个 case 的 checks 按固定文法机械求值 (lhs op rhs, op ∈ {==,!=,in,not in,<,<=,>,>=}); case 只认固定字段 {id, passed, failure_reason}, worker 自创或未知字段 → 判该 check 失败 + 告警。判定权在你 (coordinator), 不在 worker (设计 §3.1)。
@@ -201,7 +201,7 @@ input/requirement.md + (若有) clarification/*.json。
 3. **计划**: dispatch §C → 跑计划自检 → 把 design+task-plan 摘要呈给人 **plan_signoff**。人补充则回 §C; 通过则冻结计划进 IMPLEMENTING。
 4. **实施**: coordinator 每轮算 ready_frontier, 为每个 ready task dispatch 一个 §D(tools 白名单按其 allowed_write_paths 收窄)。回收 test-results/summary/key-diffs → 跑任务自检 → 过则解锁下游, 不过退回该 §D 一次。
 5. **(可选红队)**: risk:high task 收口前 dispatch §E; 人随时可手动触发。
-6. **收口**: 全部 task 过 → 跑收口自检 → 汇总所有 key-diffs.md 呈给人 **wrap_up_signoff** → 通过则 COMPLETE。
+6. **收口**: 全部 task 过 → 跑收口自检 → 普通全绿且无 high/exclusive 自动 COMPLETE; 否则汇总 check-result/key-diffs 呈给人 **wrap_up_signoff**。
 7. **升 unattended**: 切档前做存在性校验(独立复跑通道就绪?), 未就绪拒绝切换。
 
 > 每个角色都是隔离 subagent, 系统提示 = §0 + 对应角色段。coordinator 常驻主上下文, 只持有 run-state + 各 artifact 的摘要与路径。

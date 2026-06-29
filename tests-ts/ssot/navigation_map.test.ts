@@ -147,7 +147,21 @@ test("navigation map flags a watchdog-blocked task", () => {
   writeTaskPlan(path.join(runDir, "planning", "task-plan.yaml"), plan);
   const wdPath = path.join(runDir, "tasks", "T01", "logs", "watchdog.json");
   fs.mkdirSync(path.dirname(wdPath), { recursive: true });
-  fs.writeFileSync(wdPath, JSON.stringify([{ reason: "timeout" }]), "utf-8");
+  // 真实结构: watchdog mark_blocked (max_retries_exhausted) 写 reason="no_response" 的
+  // WatchdogEvent {task_id, reason, attempt, timestamp} (见 scheduling/watchdog.ts:40-44/170-178)。
+  // 注: "timeout" 是 recycle_to_pending 路径; 翻 blocked 的那条事件是 "no_response"。
+  fs.writeFileSync(
+    wdPath,
+    JSON.stringify([
+      {
+        task_id: "T01",
+        reason: "no_response",
+        attempt: 2,
+        timestamp: "2026-06-28T00:00:00.000Z",
+      },
+    ]),
+    "utf-8",
+  );
   const state = parseRunState({
     run_id: "20260628-001",
     complexity: "simple",
@@ -159,4 +173,62 @@ test("navigation map flags a watchdog-blocked task", () => {
   expect(map.task_summary.blocked).toBe(1);
   expect(map.blocker?.kind).toBe("task_failed");
   expect(map.blocker?.evidence_paths).toEqual(["tasks/T01/logs/watchdog.json"]);
+});
+
+test("navigation map flags an aborted run", () => {
+  // ABORTED: blocker.kind=aborted; 常规 phase 全 pending; 末尾追加一条 blocked 的 ABORTED phase。
+  const runDir = makeRun();
+  const state = parseRunState({
+    run_id: "20260628-001",
+    complexity: "simple",
+    phase: Phase.ABORTED,
+    // schema superRefine: phase=ABORTED 时 aborted_at 必须非空。
+    aborted_at: "2026-06-28T00:00:00.000Z",
+    aborted_reason: "人主动放弃 (test)",
+  });
+
+  const map = buildNavigationMap(runDir, state, null);
+
+  expect(map.current_phase).toBe(Phase.ABORTED);
+  expect(map.blocker?.kind).toBe("aborted");
+  expect(map.blocker?.reason).toBe("人主动放弃 (test)");
+  expect(map.blocker?.evidence_paths).toEqual(["run-state.json"]);
+  expect(map.next_action).toBe("inspect aborted_reason and start a new run if needed");
+  // 常规 phase 全部 pending。
+  expect(map.phases.find((p) => p.phase === Phase.PLANNING)?.status).toBe("pending");
+  // 末尾追加一条 ABORTED phase, status=blocked。
+  const abortedPhase = map.phases.find((p) => p.phase === Phase.ABORTED);
+  expect(abortedPhase?.status).toBe("blocked");
+  expect(abortedPhase?.detail).toBe("人主动放弃 (test)");
+});
+
+test("navigation map flags wrap-up gate failure and steers to reject", () => {
+  // 收口自检失败: submitWrapUp 不论成败都 set human_pending=wrap_up_signoff, 同时
+  // check-result.json 含 passed:false。导航图应报 wrap_up_failed, 且 next_action 优先
+  // 引导 reject (而非"去签字") —— 覆盖 nextAction 中 wrap_up_failed 优先于 human_pending 的分支。
+  const runDir = makeRun();
+  const checkPath = path.join(runDir, "wrap-up", "check-result.json");
+  fs.mkdirSync(path.dirname(checkPath), { recursive: true });
+  fs.writeFileSync(
+    checkPath,
+    JSON.stringify([
+      { check: "all_tasks_tests_green", passed: true, detail: "" },
+      { check: "all_hard_gates_pass", passed: false, detail: "T01 缺 key-diffs" },
+    ]),
+    "utf-8",
+  );
+  const state = parseRunState({
+    run_id: "20260628-001",
+    complexity: "simple",
+    phase: Phase.WRAPPING_UP,
+    human_pending: HumanPending.wrap_up_signoff,
+  });
+
+  const map = buildNavigationMap(runDir, state, null);
+
+  expect(map.blocker?.kind).toBe("wrap_up_failed");
+  expect(map.blocker?.evidence_paths).toEqual(["wrap-up/check-result.json"]);
+  expect(map.next_action).toBe(
+    "reject wrap-up, return to IMPLEMENTING, and repair failing evidence",
+  );
 });

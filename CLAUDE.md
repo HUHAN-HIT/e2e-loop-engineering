@@ -27,20 +27,20 @@ npx tsc --noEmit       # 类型检查 (无独立 lint)
 npx bun test tests-ts/ # TS 等价/集成/跨宿主一致性测试 (设计 D-4 用 Bun; 本机经 npx bun@1.3.14)
 
 # 落资产到目标项目 (cc=Claude Code, oc=OpenCode, both=双装)
-node packages/cli/dist/index.mjs install   --host <cc|oc|both> --project-dir <target> [--force]
-node packages/cli/dist/index.mjs uninstall --host <cc|oc|both> --project-dir <target>
-node packages/cli/dist/index.mjs list      --project-dir <target>
+node packages/cli/dist/index.js install   --host <cc|oc|both> --project-dir <target> [--force]
+node packages/cli/dist/index.js uninstall --host <cc|oc|both> --project-dir <target>
+node packages/cli/dist/index.js list      --project-dir <target>
 
 # 算法 dry-run (本地骨架验证, worker 用 echo 占位; TS runtime)
-node packages/cli/dist/index.mjs init <req.md>
-node packages/cli/dist/index.mjs plan <run_id> --design <file> --task-plan <file>
-node packages/cli/dist/index.mjs signoff-plan <run_id>
-node packages/cli/dist/index.mjs run <run_id>
-node packages/cli/dist/index.mjs status <run_id>
+node packages/cli/dist/index.js init <req.md>
+node packages/cli/dist/index.js plan <run_id> --design <file> --task-plan <file>
+node packages/cli/dist/index.js signoff-plan <run_id>
+node packages/cli/dist/index.js run <run_id>
+node packages/cli/dist/index.js status <run_id>
 
 # 真实 run 分发 (主 agent 当 coordinator, 配合 Task 工具派 implementation-worker)
-node packages/cli/dist/index.mjs dispatch <run_id>
-node packages/cli/dist/index.mjs collect-outcome <run_id> --task <id>
+node packages/cli/dist/index.js dispatch <run_id>
+node packages/cli/dist/index.js collect-outcome <run_id> --task <id>
 ```
 
 无独立 lint/format 命令。TS 侧用 `tsc --noEmit` 把关。

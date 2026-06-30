@@ -5,9 +5,10 @@
  * 主 agent 准备结束回合时:
  *   - 无活跃 run / phase ∈ {COMPLETE, ABORTED, ""} → 放行 (用户在做别的事)
  *   - human_pending ∈ {clarification, plan_signoff, wrap_up_signoff} → 放行 (合法人锚点)
- *   - CREATED / CLARIFYING → 放行 (允许 agent 推进到 PLANNING / PLANNING 锚点)
+ *   - CREATED → 放行 (允许 agent 推进到 CLARIFYING / PLANNING)
+ *   - CLARIFYING → 若 clarification/questions.json 已存在, 必须 set human_pending=clarification
  *   - IMPLEMENTING → 活跃 task 必须 test-results.yaml 落盘且 tests_green=true
- *   - PLANNING → 读 planning/plan-check-failures.json; 存在则 deny (上次 submitPlan 失败)
+ *   - PLANNING → 读 planning/plan-check-failures.json; 存在则 deny; 已产出 plan 须 set plan_signoff
  *   - WRAPPING_UP → 读 wrap-up/check-result.json; 任一 item 未 pass 则 deny
  *
  * Hook 不重跑 SSOT 算法 (避免循环依赖与重复计算), 只读 Coordinator 在 submitPlan /
@@ -30,14 +31,15 @@ import {
   safeReadTaskPlan,
 } from "../common.js";
 import { findActiveRun } from "../../runs.js";
-import type { HumanPending } from "../../run_state.js";
+import type { HumanPending, RunState } from "../../run_state.js";
 
 /**
  * 合法人工锚点 (design §1 / §8.1)。
- * 方法论演进 (2026-06-28): 删除 clarification 锚点 (澄清不再单独停人);
- * CREATED/CLARIFYING 仍按 phase 放行 (见下方 main), 与锚点无关。
+ * 2026-06-30: 回退为 clarification 锚点 (阻塞性澄清问题独立停人, 仅 CLARIFYING 合法);
+ * CREATED 仍按 phase 放行 (见下方 main), 与锚点无关。
  */
 const LEGAL_ANCHORS: ReadonlySet<HumanPending> = new Set([
+  "clarification",
   "plan_signoff",
   "wrap_up_signoff",
 ]);
@@ -130,26 +132,66 @@ function readWrapUpCheckResult(runDir: string): CheckFileItem[] | null {
 }
 
 /**
- * PLANNING phase 自检: 检查 plan_check 是否失败过。
+ * CLARIFYING phase 自检: clarification/questions.json 已存在时, submitClarification
+ * 必须已 set human_pending=clarification。
+ *
+ * questions.json 不存在 → 放行 (主 agent dispatch clarification-finder 中途);
+ * questions.json 存在但 human_pending !== clarification → deny (提示主 agent 调
+ *   `e2e-loop submit-clarification <run_id>`);
+ * questions.json 存在 + clarification 锚点已 set → 放行。
+ */
+function checkClarifyingPhase(runDir: string, state: RunState): PhaseCheck {
+  const qPath = path.join(runDir, "clarification", "questions.json");
+  if (!fs.existsSync(qPath)) return { ok: true, detail: "" };
+  if (state.human_pending !== "clarification") {
+    return {
+      ok: false,
+      detail:
+        "clarification/questions.json 已存在但 human_pending !== clarification。 " +
+        "主 agent 必须调 `e2e-loop submit-clarification <run_id>` 让 Coordinator " +
+        "读取并 set 锚点, 然后用 AskUserQuestion 弹结构化框问人。",
+    };
+  }
+  return { ok: true, detail: "" };
+}
+
+/**
+ * PLANNING phase 自检: 检查 plan_check 是否失败过, 且已产出 plan 时必须 set plan_signoff。
  *
  * 读 planning/plan-check-failures.json:
- *   - 不存在 → submitPlan 还没跑过或上次通过了 → 软通过 (让 agent 推进到 plan_signoff)
  *   - 存在且非空 → 上次 submitPlan 失败, 列出失败项 → deny
  *   - 存在但为空 → 退化通过 (异常状态, 不锁死)
+ *   - planning/ 目录完全空 (无 design.md AND 无 task-plan.yaml) → 还在 dispatch plan-agent 中途, 放行
+ *   - design/task-plan 已产出 → 必须 set human_pending=plan_signoff 才能结束回合, 否则 deny
  */
-function checkPlanningPhase(runDir: string): PhaseCheck {
+function checkPlanningPhase(runDir: string, state: RunState): PhaseCheck {
+  // 失败兜底 (不变): plan_check 失败 → 写 plan-check-failures.json → deny
   const failures = readPlanCheckFailures(runDir);
-  if (failures === null) {
-    return { ok: true, detail: "planning/plan-check-failures.json 不存在 (plan_check 未失败或未跑)" };
+  if (failures !== null && failures.length > 0) {
+    const lines = failures.map((f) => `  - ${f.check}: ${f.detail}`).join("\n");
+    return {
+      ok: false,
+      detail: `plan_check 失败 (${failures.length} 项):\n${lines}`,
+    };
   }
-  if (failures.length === 0) {
-    return { ok: true, detail: "planning/plan-check-failures.json 为空" };
+  // 新增宽限: planning/ 目录完全空 (无 design.md AND 无 task-plan.yaml)
+  // → 还在 dispatch plan-agent 中途, 放行
+  const designExists = fs.existsSync(path.join(runDir, "planning", "design.md"));
+  const taskPlanExists = fs.existsSync(path.join(runDir, "planning", "task-plan.yaml"));
+  if (!designExists && !taskPlanExists) {
+    return { ok: true, detail: "" };
   }
-  const lines = failures.map((f) => `  - ${f.check}: ${f.detail}`).join("\n");
-  return {
-    ok: false,
-    detail: `plan_check 失败 (${failures.length} 项):\n${lines}`,
-  };
+  // 新增强制: design/task-plan 已产出 → 必须 set human_pending=plan_signoff 才能结束回合
+  if (state.human_pending !== "plan_signoff") {
+    return {
+      ok: false,
+      detail:
+        "planning/design.md 或 task-plan.yaml 已存在但 human_pending !== plan_signoff。 " +
+        "主 agent 必须调 `e2e-loop plan <run_id> --design <file> --task-plan <file>` " +
+        "让 Coordinator 跑 plan_check 并 set 锚点, 然后用 AskUserQuestion 弹结构化框请人拍板。",
+    };
+  }
+  return { ok: true, detail: "" };
 }
 
 /**
@@ -286,16 +328,18 @@ export async function handle(input: HookInput): Promise<HookOutput> {
       return passSilent();
     }
 
-    if (phase === "CREATED" || phase === "CLARIFYING") {
-      // CREATED / CLARIFYING 且无 human_pending → 自动模式, 允许 agent 继续推进
+    if (phase === "CREATED") {
+      // CREATED 且无 human_pending → 自动模式, 允许 agent 继续推进
       return passSilent();
     }
 
     let check: PhaseCheck;
-    if (phase === "IMPLEMENTING") {
+    if (phase === "CLARIFYING") {
+      check = checkClarifyingPhase(active.runDir, state);
+    } else if (phase === "IMPLEMENTING") {
       check = checkImplementingPhase(active.runDir);
     } else if (phase === "PLANNING") {
-      check = checkPlanningPhase(active.runDir);
+      check = checkPlanningPhase(active.runDir, state);
     } else if (phase === "WRAPPING_UP") {
       check = checkWrappingUpPhase(active.runDir);
     } else {

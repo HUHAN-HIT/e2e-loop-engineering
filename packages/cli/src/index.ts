@@ -34,6 +34,10 @@ import {
   runDispatch,
   runCollectOutcome,
 } from "./commands/dryrun.js";
+import {
+  runSubmitClarification,
+  runAnswerClarification,
+} from "./commands/clarification.js";
 import { InvalidHostError } from "./util.js";
 
 /**
@@ -119,6 +123,11 @@ async function main(): Promise<number> {
       return dryRunGuard(() => runDispatch(args));
     case "collect-outcome":
       return dryRunGuard(() => runCollectOutcome(args));
+    // --- clarification 子命令 (人盯点 0, CLARIFYING phase) ---
+    case "submit-clarification":
+      return dryRunGuard(() => runSubmitClarification(args));
+    case "answer-clarification":
+      return dryRunGuard(() => runAnswerClarification(args));
     case undefined:
       process.stderr.write("错误: 缺少子命令\n\n");
       printHelp(process.stderr);

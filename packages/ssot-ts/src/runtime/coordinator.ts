@@ -236,25 +236,39 @@ export class Coordinator {
   /**
    * 存 questions.json (含 skip_basis)。
    *
-   * 方法论演进 (2026-06-28): 澄清不再单独停人——无论有无阻塞问题, 都不 set 人盯点;
-   * 有阻塞问题时带 default_if_unanswered 继续, 问题在 plan 签署时一并呈现。
+   * 2026-06-30: 回退为 clarification 人锚点。有阻塞问题 set 锚点等用户回答; 无阻塞不 set 让 startPlanning 直接推进。
    */
   submitClarification(q: ClarificationQuestions): void {
     const qPath = path.join(this.runDir, "clarification", "questions.json");
     fs.mkdirSync(path.dirname(qPath), { recursive: true });
     fs.writeFileSync(qPath, `${JSON.stringify(q, null, 2)}\n`, "utf-8");
+    // 有阻塞性问题 → set clarification 锚点 (仍在 CLARIFYING, 让主 agent 用
+    // AskUserQuestion 弹结构化框问人); 无阻塞 (空 questions + 非空 skip_basis)
+    // → 不 set 锚点, 让主 agent 直接 startPlanning 进 PLANNING。
+    if (q.questions.length > 0) {
+      if (this.state.phase !== Phase.CLARIFYING) {
+        throw new Error(
+          `submitClarification(有阻塞问题) 必须在 CLARIFYING phase (当前 ${this.state.phase})`,
+        );
+      }
+      this.state = setHumanPending(this.state, HumanPending.clarification);
+      this.refreshStateFile();
+    }
   }
 
   /**
    * 存 answers.json → 进 PLANNING (CLARIFYING 时)。
    *
-   * 方法论演进 (2026-06-28): 无 clarification 锚点可清; 仅记录默认采纳并推进。
+   * 2026-06-30: 若 CLARIFYING 阶段 set 过 clarification 锚点则清掉, 再推进 PLANNING。
    */
   answerClarification(answers: ClarificationAnswers): void {
     const aPath = path.join(this.runDir, "clarification", "answers.json");
     fs.mkdirSync(path.dirname(aPath), { recursive: true });
     fs.writeFileSync(aPath, `${JSON.stringify(answers, null, 2)}\n`, "utf-8");
     if (this.state.phase === Phase.CLARIFYING) {
+      if (this.state.human_pending === HumanPending.clarification) {
+        this.state = clearHumanPending(this.state);
+      }
       this.state = advancePhase(this.state, Phase.PLANNING);
     }
     this.refreshStateFile();

@@ -7,6 +7,55 @@
 
 首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
 
+### 修复 — clarification 人锚点回退 + 状态机同步 + 全阶段主 agent 不干活 (2026-06-30)
+
+回退 2026-06-28 "澄清永不单独停人"的演进, 恢复阻塞性澄清问题为独立人锚点; 同时修复 clarifying→planning 状态机不同步 bug, 在 hook 层强制 PLANNING 必须 set plan_signoff, 在提示词顶部硬声明"全阶段主 agent 不干活"反豁免幻觉.
+
+- **数据模型 (`packages/ssot-ts/src/schema/run_state.ts` + `packages/shared/src/run_state.ts`):**
+  `HumanPending` 加第三个值 `clarification` (与 `plan_signoff` / `wrap_up_signoff` 并列).
+  共享层手写 union 同步更新 (hook 通过此类型校验字面量合法性).
+- **状态机 (`packages/ssot-ts/src/state_machine/human_anchors.ts`):**
+  `ANCHOR_ALLOWED_PHASES` 加 `[clarification]: {CLARIFYING}`, `setHumanPending` 校验天然兼容.
+  docstring 由"两类合法人锚点"改为"三类".
+- **Coordinator (`packages/ssot-ts/src/runtime/coordinator.ts`):**
+  `submitClarification(q)` 重写为按内容分支 — `questions` 非空时 `setHumanPending(clarification)`
+  (仍在 CLARIFYING, 让主 agent 用 AskUserQuestion 弹结构化框问人), 空 (仅 skip_basis) 不 set
+  锚点让 `startPlanning` 直接推进. `answerClarification(answers)` 补 `clearHumanPending` (若
+  clarification 锚点已 set) 后 `advancePhase(PLANNING)`. 修复原 `submitClarification` 不推 phase
+  导致 run-state.json 卡在 CLARIFYING 的 bug.
+- **guard_anchors hook (`packages/shared/src/hooks/guard_anchors/logic.ts`):**
+  `LEGAL_ANCHORS` 加 `"clarification"`. 新增 `checkClarifyingPhase` — `questions.json` 已存在
+  但 `human_pending !== clarification` 时 deny, 提示主 agent 调 `submit-clarification` CLI.
+  强化 `checkPlanningPhase` — 加 plan_signoff 强制: `planning/design.md` 或 `task-plan.yaml`
+  已产出时必须 `human_pending === plan_signoff` 才能 结束回合 (堵主 agent 脑补"项目结构清晰"
+  绕过 plan-agent 自己写计划的越权); `planning/` 目录完全空时放行 (dispatch plan-agent 中途宽限).
+- **CLI (`packages/cli/src/commands/clarification.ts` 新增 + `index.ts` 注册 + `help.ts` 帮助):**
+  新增 `submit-clarification <run_id>` (读 questions.json → Coordinator set 锚点 if 有阻塞问题,
+  stdout 提示主 agent 用 AskUserQuestion 弹问) 与 `answer-clarification <run_id> --answers <file>`
+  (读答案 → Coordinator 清锚点 + 推进 PLANNING). `dryrun.ts` 把 5 个 helper (makeRunner /
+  resolveRunsRoot / resolveRunDir / positional / humanPendingText) 加 export, `args.ts` 注册
+  `--answers` 选项.
+- **提示词 (`core/coordinator.md` + `core/subagents/clarification-finder.md`):**
+  coordinator.md 新增 §1.6 「全阶段硬不变量 (反豁免幻觉)」— 列举 5 条容易被主 agent 脑补的
+  豁免理由 ("项目结构清晰" / "需求很简单不用拆" / "我一眼就能写出 plan" /
+  "子 agent 太慢我自己列" / "上下文不够先手写垫一下") 均不合法, guard_paths hook 物理 deny.
+  §阶段 1 重写为按 complexity 分流: simple 规则驱动跳过; medium/complex 走 clarification-finder →
+  submit-clarification → AskUserQuestion 弹问 → answer-clarification 推进. 表格行 + §13 示例
+  同步. clarification-finder.md 调整 `can_proceed_with_defaults` 语义注释 (表示"有可回退默认"
+  而非"不停人").
+- **测试覆盖同步:**
+  - `tests-ts/ssot/schema_run_state.test.ts`: `human_pending` 枚举循环补 `clarification`.
+  - `tests-ts/ssot/human_anchors.test.ts`: 删过时"不再含 clarification"用例, 加 3 条 clarification
+    合法性用例 (CLARIFYING 合法 / PLANNING 抛 / CREATED·IMPLEMENTING·WRAPPING_UP 抛).
+  - `tests-ts/guard_anchors.test.ts`: 原"PLANNING + 无 failures → allow" 用例 (新行为下回归 fail)
+    拆为 4 条 (planning 空目录 allow / design.md 存在无锚 deny / design.md+plan_signoff allow /
+    failures 非空+plan_signoff deny); 新增 4 条 CLARIFYING 用例 (无 questions allow /
+    有 questions 无锚 deny 含 submit-clarification 提示 / 有 questions+clarification allow /
+    仅 clarification 锚 allow).
+  - `tests-ts/ssot/coordinator_clarification.test.ts` (新增): 5 条用例覆盖 submitClarification
+    (非空 set 锚 / 空 skip_basis 不 set / 非空在 PLANNING throw) 与 answerClarification
+    (清锚+推进 PLANNING / 无锚仍推进 向后兼容).
+
 ### 新增 — 主 agent 不干活强制 (A+B 案, 2026-06-30)
 
 针对观察到的反复问题——主 agent 在 plan/implement 阶段绕过 Task 工具直接扮演 worker 写产物,

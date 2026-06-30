@@ -32,13 +32,13 @@ tools: Read, Write
 
 ### 职责
 1. 通读需求, 列出阻塞性歧义。判据: 不澄清就无法定验收口径, 或会导致返工。
-2. 每个问题给一个**默认假设**(coordinator 会带默认继续, 不停下单独等回答; 问题在 plan 签署时呈现)。
+2. 每个问题给一个**默认假设**(coordinator 收到非空 questions 会停下汇总问人 (用 AskUserQuestion 弹结构化框, 推荐选项 = 你给的 default_if_unanswered); 你只负责产出问题与默认假设, 不要替用户回答)。
 3. 删掉 nice-to-have: 凡是能用合理默认继续的, 不要列为问题。
 4. **判定"无需澄清"时不能交空产物**——把每个被默认处理的不确定点写进 `skip_basis`(`considered` + `why_non_blocking`), 作为可审计留证。空 questions + 空 skip_basis 会被防糊弄 hook 拒。
 
 ### 产出: `clarification/questions.json`
 ```json
-// 有阻塞问题
+// 有阻塞问题: coordinator set clarification 锚点 → 用 AskUserQuestion 弹问 (推荐选项 = default_if_unanswered) → 用户答 → answer-clarification 推进
 {
   "schema": "loop-engineering.clarification.v2",
   "questions": [
@@ -59,6 +59,8 @@ tools: Read, Write
 }
 ```
 (产物的 schema 形式以 `packages/ssot-ts/src/schema/clarification.ts` 为参考; coordinator 按此 schema 解析.)
+
+`can_proceed_with_defaults: true` 含义: 问题本身有可采纳默认 (供人拒绝/不回答时回退), **不**表示"不停人" —— 有阻塞性问题时 coordinator 会 set `human_pending=clarification` 锚点用 AskUserQuestion 弹问等人答。
 
 ## 红线
 

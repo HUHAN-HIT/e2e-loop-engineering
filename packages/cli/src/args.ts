@@ -78,6 +78,9 @@ export function parseCliArgs(tokens: string[]): Args {
     // --- 真实 run 子命令 (M7C) ---
     // --task <id>: collect-outcome 必需, 指定要校验的 task_id
     task: { type: "string" as const },
+    // --- clarification 子命令 ---
+    // --answers <json-file>: answer-clarification 必需, 指向用户答案 JSON 文件
+    answers: { type: "string" as const },
   };
 
   const values: Record<string, string | undefined> = {};

@@ -25,14 +25,34 @@ function make(phase: Phase): RunState {
   return parseRunState({ run_id: "r1", complexity: "simple", phase });
 }
 
-// ---------- clarification 锚点已删除 (方法论演进 2026-06-28) ----------
+// ---------- clarification 锚点 (2026-06-30 回退为独立人锚点) ----------
 
-test("HumanPending 不再含 clarification (澄清不再单独停人)", () => {
-  // 枚举只剩两个人盯点; clarification 作为锚点已不存在。
+test("HumanPending 含 clarification (回退: 阻塞性澄清问题独立停人)", () => {
+  // 枚举含三个人盯点; clarification 仅在 CLARIFYING 阶段合法。
   expect(Object.values(HumanPending).sort()).toEqual([
+    "clarification",
     "plan_signoff",
     "wrap_up_signoff",
   ]);
+});
+
+test("clarification 锚点 + CLARIFYING phase → 合法 (setHumanPending 不抛)", () => {
+  const s = setHumanPending(make(Phase.CLARIFYING), HumanPending.clarification);
+  expect(s.human_pending).toBe(HumanPending.clarification);
+});
+
+test("clarification 锚点 + PLANNING phase → 抛 InvalidHumanAnchorError", () => {
+  expect(() =>
+    setHumanPending(make(Phase.PLANNING), HumanPending.clarification),
+  ).toThrow(InvalidHumanAnchorError);
+});
+
+test("clarification 锚点 + IMPLEMENTING/WRAPPING_UP/CREATED phase → 抛 InvalidHumanAnchorError", () => {
+  for (const bad of [Phase.CREATED, Phase.IMPLEMENTING, Phase.WRAPPING_UP]) {
+    expect(() =>
+      setHumanPending(make(bad), HumanPending.clarification),
+    ).toThrow(InvalidHumanAnchorError);
+  }
 });
 
 // ---------- plan_signoff ----------

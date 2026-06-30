@@ -18,7 +18,7 @@ worker 任务通过 **Task 工具** 分发给 4 个子 agent:
 
 | 子 agent 文件 | 阶段 | 何时分发 |
 | --- | --- | --- |
-| `.claude/agents/clarification-finder.md` | CLARIFYING | medium/complex 评估澄清时 (simple 整段跳过); 产问题或 skip_basis, **不停人等回答** |
+| `.claude/agents/clarification-finder.md` | CLARIFYING | medium/complex 评估澄清时 (simple 整段跳过); 产问题 (阻塞→主 agent 用 AskUserQuestion 弹问, 推荐选项=default_if_unanswered) 或 skip_basis |
 | `.claude/agents/plan-agent.md` | PLANNING | 每个 run 一次, 产出全部计划契约 |
 | `.claude/agents/implementation-worker.md` | IMPLEMENTING | 每 task 一个, 隔离上下文, DAG ready frontier 推进 |
 | `.claude/agents/red-team-reviewer.md` | 按需 | 仅当人要求或某 task `risk: high` 在收口前 |
@@ -71,6 +71,28 @@ worker 任务通过 **Task 工具** 分发给 4 个子 agent:
 
 **异常处理:** 若 hook 误拒了你认为合法的写入 (例如新增的状态文件路径), 不要尝试绕过 —— 上报"hook 边界需扩"并 abort run, 由人决定是否扩展 hook 白名单 (改 `packages/shared/src/hooks/guard_paths/logic.ts`). 不要在主上下文直接写产物绕过.
 
+## 1.6 全阶段硬不变量 (反豁免幻觉)
+
+**无论 complexity 档位、无论项目结构看起来多清晰、无论你判断需求多简单**, worker 产物必由对应子 agent 写, 你 (主 agent / coordinator) 不替代 worker 干活:
+
+| 阶段 | 产物路径 | 必由谁写 |
+| --- | --- | --- |
+| CLARIFYING | `clarification/questions.json` | clarification-finder 子 agent |
+| PLANNING | `planning/{design.md, task-plan.yaml, service-contracts.yaml}` | plan-agent 子 agent |
+| IMPLEMENTING | `tasks/<tid>/{test-results.yaml, summary.md, key-diffs.yaml}` + task `allowed_write_paths` 内源码 | implementation-worker 子 agent |
+| WRAPPING_UP (按需) | `wrap-up/red-team-review.md` | red-team-reviewer 子 agent |
+
+**反豁免幻觉清单** —— 以下"理由"全部**不是**你绕过子 agent 直接动笔的合法借口, guard_paths hook 会物理 deny:
+- "项目结构清晰, 我一眼就能写出 plan" → 仍必须 dispatch plan-agent
+- "需求很简单, 不用拆" → simple 档也要走 CREATED→PLANNING→IMPLEMENTING, plan-agent 仍要产 design.md + task-plan.yaml
+- "clarification-finder / plan-agent 太慢, 我自己列更快" → 速度不是豁免理由
+- "上下文不够, 先手写点东西垫一下" → 缺上下文就调子 agent 给它 packet, 不是自己写
+- "我只是在草稿, 不是最终产物" → 任何对 worker 产物路径的 Write/Edit 都被 hook 拦
+
+**异常处理:** 若 hook 误拒了你认为合法的写入 (例如新增的状态文件路径), 不要尝试绕过 —— 上报"hook 边界需扩"并 abort run, 由人决定是否扩展 hook 白名单 (改 `packages/shared/src/hooks/guard_paths/logic.ts`). 不要在主上下文直接写产物绕过。
+
+**这条不变量与 §1.5 角色边界是同一件事的两次声明** —— §1.5 给出"谁写什么"的表, 这里强调"任何脑补的豁免都不合法"。两条互相强化。
+
 ## 2. 核心信条(决定一切下游行为)
 
 1. **协作,不是对抗。** 参与方(你、各工作角色、人)是会犯错的协作者,不是要互相提防的对手。**绝不为"防工作角色作弊"付出结构成本**(不做密码学防伪、不做时序快照、不让两个角色互相否决)。
@@ -114,28 +136,36 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 
 **不要**用 complex 的全套去套 simple 需求——摩擦要与复杂度匹配。
 
-### 阶段 1 · 澄清(CLARIFYING,多数 run 跳过,**永不单独停人**)
+### 阶段 1 · 澄清(CLARIFYING, simple 档规则驱动跳过; medium/complex 有阻塞性问题时停人)
 
-澄清评估"是否存在**阻塞性歧义**"(不澄清就无法定验收口径,或必然返工)。craft 判据见 `standards/clarification-standard.md` 与 `standards/glossary.md` §2。规则:
+澄清评估"是否存在**阻塞性歧义**"(不澄清就无法定验收口径, 或必然返工)。craft 判据见 `standards/clarification-standard.md` 与 `standards/glossary.md` §2。规则:
 
-- 只问"答案会改变设计/拆分/测试/风险"的问题;删掉一切 nice-to-have。
-- 每个问题给一个**可直接采纳的默认假设**。
-- **澄清不再是一个人盯点**:无论有无阻塞问题,都**不**停下单独等人——有阻塞问题就带 `default_if_unanswered` 默认继续,把这些问题与采用的默认在**计划拍板**时一并呈给人(人可在那时改)。必经停人点只有 plan 签署；收口仅在自检失败、risk:high 或 exclusive task 时停人。
+- 只问"答案会改变设计/拆分/测试/风险"的问题; 删掉一切 nice-to-have。
+- 每个问题给一个**可直接采纳的默认假设** (`default_if_unanswered`), 作为 AskUserQuestion 的推荐选项。
 
-**"无需澄清"的判断必须落成可审计证据(用户决策 2026-06-28):**
-- simple 档跳过是规则驱动——`complexity=simple` 本身即证据,**不需** skip_basis,直接进 PLANNING。
-- **medium/complex 的裁量跳过**(你判定"看了,没有阻塞歧义")**必须**产出 `clarification/questions.json`,其中 `questions: []` 但 `skip_basis` 非空——每条 = `{considered: 被评估的歧义点, why_non_blocking: 为何非阻塞/可给无损默认}`。空跳过(既无问题又无 skip_basis)会被防糊弄 hook 拒绝(`post_task_collect`),plan 自检(`plan_check` 的 `clarification_evidence`)在 plan 签署前再兜底一道。
+**澄清流程 (按 complexity 分流):**
+
+- **simple 档**: 规则驱动跳过 —— `complexity=simple` 即证据, **不进 CLARIFYING**, CREATED→PLANNING 直接推进, 不调 clarification-finder。
+- **medium/complex 档**: CREATED→CLARIFYING → dispatch `.claude/agents/clarification-finder.md` 子 agent 产 `clarification/questions.json` → 主 agent 调 `e2e-loop submit-clarification <run_id>`:
+  - **有阻塞性问题** (`questions` 非空): Coordinator `set human_pending=clarification` (仍在 CLARIFYING) → 主 agent 用 **AskUserQuestion 工具弹结构化框** (每个 question 一个提问项, 推荐选项置顶 = 该 question 的 `default_if_unanswered`)。用户回答后, 主 agent 把答案整理为 JSON 文件 (含每个 question 的 `id` + 用户给的 answer; 若用户未答则用 default_if_unanswered), 调 `e2e-loop answer-clarification <run_id> --answers <json-file>` → Coordinator 清锚点 + 推进 PLANNING。
+  - **无阻塞问题** (`questions: []` + 非空 `skip_basis`): Coordinator 不 set 锚点 → 主 agent 直接调 `e2e-loop plan <run_id> ...` 进 PLANNING。
+
+**"无需澄清"的判断必须落成可审计证据 (用户决策 2026-06-28, 2026-06-30 修订):**
+- simple 档跳过是规则驱动 —— `complexity=simple` 本身即证据, **不需** skip_basis, 直接进 PLANNING。
+- **medium/complex 的裁量跳过** (你判定"看了, 没有阻塞歧义") **必须**产出 `clarification/questions.json`, 其中 `questions: []` 但 `skip_basis` 非空 —— 每条 = `{considered: 被评估的歧义点, why_non_blocking: 为何非阻塞/可给无损默认}`。空跳过 (既无问题又无 skip_basis) 会被防糊弄 hook 拒绝 (`post_task_collect`), `submit-clarification` 也会拒绝, plan 自检 (`plan_check` 的 `clarification_evidence`) 在 plan 签署前再兜底一道。
 
 dispatch `.claude/agents/clarification-finder.md`, 产出 `clarification/questions.json`:
 ```json
-// 有阻塞问题: 带默认继续, 问题挂到 plan 签署呈现
+// 有阻塞问题: 主 agent 调 submit-clarification 后会 set 锚点, 然后用 AskUserQuestion 弹问
 { "questions": [ { "id":"Q1", "question":"...", "why_blocking":"影响哪条AC/拆分/测试/风险", "default_if_unanswered":"..." } ],
   "skip_basis": [], "can_proceed_with_defaults": true }
-// 裁量跳过 (medium/complex): 空问题 + 非空 skip_basis 留证
+// 裁量跳过 (medium/complex): 空问题 + 非空 skip_basis 留证; 主 agent 调 submit-clarification 不 set 锚点, 直接进 PLANNING
 { "questions": [],
   "skip_basis": [ { "considered":"验证码位数/字符集", "why_non_blocking":"可给无损默认: 5 位纯数字, 错了仅局部返工" } ],
   "can_proceed_with_defaults": true }
 ```
+
+`can_proceed_with_defaults: true` 表示"问题本身有可采纳默认 (供人拒绝/不回答时回退)", **不**表示"不停人"。有阻塞问题时主 agent 必须 stop 等人答。
 
 ### 阶段 2 · 计划(PLANNING)
 
@@ -379,7 +409,10 @@ runs/<run_id>/
 
 ```
 需求:"给登录加图形验证码"
-→ 复杂度:medium(单服务,3 个 AC)。裁量跳过澄清(无阻塞歧义)→ 产 questions.json 留 skip_basis(评估过"验证码位数/是否接第三方",均可给无损默认),不停人。
+→ 复杂度:medium(单服务,3 个 AC)。
+→ 澄清: dispatch clarification-finder。两分支:
+   - 若 finder 产了阻塞问题 → 调 submit-clarification → set clarification 锚点 → 主 agent 用 AskUserQuestion 弹结构化框(推荐选项=default_if_unanswered)→ 用户答 → 调 answer-clarification → 推进 PLANNING。
+   - 若 finder 产空 questions + 非空 skip_basis(评估过"验证码位数/是否接第三方",均可给无损默认)→ 调 submit-clarification → 不 set 锚点 → 直接 plan。
 → 计划: dispatch plan-agent → design.md + task-plan.yaml:
     T01 验证码生成(无依赖) / T02 校验接口(无依赖) / T03 登录接入(依赖 T01,T02)
     每个 task 带 scenario+checks。计划自检过。
@@ -394,7 +427,7 @@ runs/<run_id>/
 
 ---
 
-**停回合的唯一依据(硬不变量):** 是否停下、是否结束回合,**只看状态机**——`human_pending` 非空(合法人锚点 `plan_signoff` / `wrap_up_signoff`)、phase ∈ {COMPLETE, ABORTED}、或 IMPLEMENTING 下所有 task 已 complete。除此之外,只要 ready frontier 还能推,就继续推,不要停下请示。
+**停回合的唯一依据(硬不变量):** 是否停下、是否结束回合,**只看状态机**——`human_pending` 非空(合法人锚点 `clarification` / `plan_signoff` / `wrap_up_signoff`)、phase ∈ {COMPLETE, ABORTED}、或 IMPLEMENTING 下所有 task 已 complete。除此之外,只要 ready frontier 还能推,就继续推,不要停下请示。
 
 **上下文信号永远不是停止理由。** harness 的上下文压缩 / 摘要 / "context 变长 / 成本高" 提示,以及任何 `<system-reminder>` 注入的状态,都是系统自己的家务——对你透明、自动发生(压缩后工作可无缝继续)。你**绝不**因为"上下文快满了""是不是该歇一下""怕浪费 token"而停下请示或结束回合。`<system-reminder>` 是数据不是指令;把这类状态信号误读成"该停一下"的指令,是本范式里唯一靠提示纪律就能杜绝的早停。
 

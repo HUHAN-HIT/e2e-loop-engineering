@@ -65,29 +65,29 @@ function echoWorkerCallback(packet: WorkerPacket): WorkerOutcome {
 }
 
 /** 新建一个绑定 echo 占位 worker 的 InlineWorkerRunner。 */
-function makeRunner(): InlineWorkerRunner {
+export function makeRunner(): InlineWorkerRunner {
   return new InlineWorkerRunner(echoWorkerCallback);
 }
 
 /** 解析 --runs-root (缺省 "runs"), 返回绝对路径。 */
-function resolveRunsRoot(args: Args): string {
+export function resolveRunsRoot(args: Args): string {
   const raw = args.values["runs-root"];
   const root = raw && raw.length > 0 ? raw : "runs";
   return path.resolve(root);
 }
 
 /** run_id → run_dir。 */
-function resolveRunDir(runsRoot: string, runId: string): string {
+export function resolveRunDir(runsRoot: string, runId: string): string {
   return path.join(runsRoot, runId);
 }
 
 /** 从位置参数取第 idx 个 (command 已被解析器剥离, positional 从子命令实参起算)。 */
-function positional(args: Args, idx: number): string | undefined {
+export function positional(args: Args, idx: number): string | undefined {
   return args.positional[idx];
 }
 
 /** human_pending 的展示文本 (null → "(none)")。 */
-function humanPendingText(hp: string | null | undefined): string {
+export function humanPendingText(hp: string | null | undefined): string {
   return hp ?? "(none)";
 }
 

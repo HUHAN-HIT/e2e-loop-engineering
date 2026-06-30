@@ -419,37 +419,113 @@ test("phase=CREATED 无 human_pending → allow (允许推进)", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// 用例 10: phase=PLANNING (无 human_pending) + 无 plan-check-failures.json → allow
-// (软通过: submitPlan 还没跑过或上次通过了, 让 agent 推进到 plan_signoff)
+// 用例 10a: phase=PLANNING + planning/ 目录完全空 + 无 plan_signoff → allow
+// (dispatch plan-agent 中途宽限: 还没产 design.md / task-plan.yaml)
 // ---------------------------------------------------------------------------
 
-test("phase=PLANNING 无 human_pending + 无 plan-check-failures.json → allow", async () => {
-  const repoRoot = makeRepoRoot("planning");
-  makeRun(
-    repoRoot,
-    "20260101-001",
-    {
-      run_id: "20260101-001",
-      phase: "PLANNING",
-      complexity: "simple",
-      trust_mode: "collaborative",
-      active_tasks: [],
-    },
-    SINGLE_RUNNING_PLAN,
-  );
+test("PLANNING + planning/ 目录完全空 + 无 plan_signoff → allow (dispatch 中途宽限)", async () => {
+  const repoRoot = makeRepoRoot("planningempty");
+  // 不传 planYaml → planning/ 下无 design.md 也无 task-plan.yaml
+  makeRun(repoRoot, "20260101-001", {
+    run_id: "20260101-001",
+    phase: "PLANNING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    active_tasks: [],
+  });
 
   const out = await handleGuardAnchors(stopInput(repoRoot));
-  // planning/plan-check-failures.json 不存在 → 软通过放行
   expect(out.decision).toBe("allow");
 });
 
 // ---------------------------------------------------------------------------
-// 用例 10b: phase=PLANNING + plan-check-failures.json 存在且非空 → deny
-// (Coordinator.submitPlan 失败后落的结果文件, hook 据此门禁)
+// 用例 10b: phase=PLANNING + design.md 已存在 + 无 plan_signoff → deny
+// (提示调 plan CLI 让 Coordinator 跑 plan_check 并 set 锚点)
 // ---------------------------------------------------------------------------
 
-test("phase=PLANNING + plan-check-failures.json 非空 → deny", async () => {
-  const repoRoot = makeRepoRoot("planningfail");
+test("PLANNING + design.md 已存在 + 无 plan_signoff → deny (提示调 plan CLI)", async () => {
+  const repoRoot = makeRepoRoot("planningnodesignoff");
+  const runDir = makeRun(repoRoot, "20260101-001", {
+    run_id: "20260101-001",
+    phase: "PLANNING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    active_tasks: [],
+  });
+  // 写一个 design.md (内容随意), 触发"已产 plan 但未 set plan_signoff"硬门
+  fs.writeFileSync(
+    path.join(runDir, "planning", "design.md"),
+    "# design\n",
+    "utf-8",
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("deny");
+  const reason = (out as { reason?: string }).reason ?? "";
+  expect(reason.toLowerCase()).toContain("plan_signoff");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 10c: phase=PLANNING + design.md 已存在 + human_pending=plan_signoff → allow
+// ---------------------------------------------------------------------------
+
+test("PLANNING + design.md 已存在 + human_pending=plan_signoff → allow", async () => {
+  const repoRoot = makeRepoRoot("planningsignoff");
+  const runDir = makeRun(repoRoot, "20260101-001", {
+    run_id: "20260101-001",
+    phase: "PLANNING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    human_pending: "plan_signoff",
+    active_tasks: [],
+  });
+  fs.writeFileSync(
+    path.join(runDir, "planning", "design.md"),
+    "# design\n",
+    "utf-8",
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("allow");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 10d: phase=PLANNING + plan-check-failures.json 非空 + human_pending=plan_signoff → deny
+// (即便设了锚点, plan_check 失败仍硬门 → 让 agent 重新提交 plan)
+// ---------------------------------------------------------------------------
+
+test("PLANNING + plan-check-failures.json 非空 + human_pending=plan_signoff → deny", async () => {
+  const repoRoot = makeRepoRoot("planningfail2");
+  const runDir = makeRun(repoRoot, "20260101-001", {
+    run_id: "20260101-001",
+    phase: "PLANNING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    human_pending: "plan_signoff",
+    active_tasks: [],
+  });
+  // 模拟 Coordinator.submitPlan 失败写下的结果文件
+  fs.writeFileSync(
+    path.join(runDir, "planning", "plan-check-failures.json"),
+    JSON.stringify([
+      { check: "x", passed: false, detail: "y" },
+    ]),
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("deny");
+  const reason = (out as { reason?: string }).reason ?? "";
+  expect(reason).toContain("plan_check");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 10e: phase=PLANNING + plan-check-failures.json 非空 (失败项明细透传) → deny
+// (plan_check 失败短路优先于 design/plan_signoff 检查, 故无 plan_signoff 也 deny;
+//  本用例固化失败项 check 名透传到 reason, 便于 agent 定位)
+// ---------------------------------------------------------------------------
+
+test("PLANNING + plan-check-failures.json 非空 → deny, reason 含失败 check 名 (path_overlap/acceptance_refs)", async () => {
+  const repoRoot = makeRepoRoot("planningfaildetail");
   const runDir = makeRun(
     repoRoot,
     "20260101-001",
@@ -569,6 +645,101 @@ test("phase=WRAPPING_UP + check-result.json 全 pass → allow", async () => {
       { check: "key_diffs_high_risk_filled", passed: true, detail: "T2 ok" },
     ]),
   );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("allow");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 11d: CLARIFYING + 无 questions.json + 无 human_pending → allow
+// (主 agent dispatch clarification-finder 的工作窗口, 没产出问题就允许推进)
+// ---------------------------------------------------------------------------
+
+test("CLARIFYING + 无 questions.json + 无 human_pending → allow (dispatch 工作窗口)", async () => {
+  const repoRoot = makeRepoRoot("clarifyingempty");
+  // 不写 clarification/questions.json, 不 set 锚点
+  makeRun(repoRoot, "20260101-001", {
+    run_id: "20260101-001",
+    phase: "CLARIFYING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    active_tasks: [],
+  });
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("allow");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 11e: CLARIFYING + questions.json 存在 + 无 human_pending → deny
+// (提示主 agent 调 submit-clarification 让 Coordinator set 锚点)
+// ---------------------------------------------------------------------------
+
+test("CLARIFYING + questions.json 存在 + 无 human_pending → deny (提示 submit-clarification)", async () => {
+  const repoRoot = makeRepoRoot("clarifyingnoanchor");
+  const runDir = makeRun(repoRoot, "20260101-001", {
+    run_id: "20260101-001",
+    phase: "CLARIFYING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    active_tasks: [],
+  });
+  // 写一个合法 questions.json (内容随意)
+  fs.mkdirSync(path.join(runDir, "clarification"), { recursive: true });
+  fs.writeFileSync(
+    path.join(runDir, "clarification", "questions.json"),
+    JSON.stringify({ schema: "loop-engineering.clarification.v2", questions: [] }),
+    "utf-8",
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("deny");
+  const reason = (out as { reason?: string }).reason ?? "";
+  expect(reason).toContain("clarification");
+  expect(reason).toContain("submit-clarification");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 11f: CLARIFYING + questions.json 存在 + human_pending=clarification → allow
+// ---------------------------------------------------------------------------
+
+test("CLARIFYING + questions.json 存在 + human_pending=clarification → allow", async () => {
+  const repoRoot = makeRepoRoot("clarifyinganchored");
+  const runDir = makeRun(repoRoot, "20260101-001", {
+    run_id: "20260101-001",
+    phase: "CLARIFYING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    human_pending: "clarification",
+    active_tasks: [],
+  });
+  fs.mkdirSync(path.join(runDir, "clarification"), { recursive: true });
+  fs.writeFileSync(
+    path.join(runDir, "clarification", "questions.json"),
+    JSON.stringify({ schema: "loop-engineering.clarification.v2", questions: [] }),
+    "utf-8",
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("allow");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 11g: CLARIFYING + human_pending=clarification + 无 questions.json → allow
+// (合法人锚点优先: 锚点已 set, questions.json 缺失也不锁死)
+// ---------------------------------------------------------------------------
+
+test("CLARIFYING + human_pending=clarification + 无 questions.json → allow (合法锚点)", async () => {
+  const repoRoot = makeRepoRoot("clarifyinganchoronly");
+  makeRun(repoRoot, "20260101-001", {
+    run_id: "20260101-001",
+    phase: "CLARIFYING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    human_pending: "clarification",
+    active_tasks: [],
+  });
+  // 不写 clarification/questions.json
 
   const out = await handleGuardAnchors(stopInput(repoRoot));
   expect(out.decision).toBe("allow");

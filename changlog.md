@@ -7,6 +7,27 @@
 
 首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
 
+### 修复 — 协调器补 shell 纪律, 阶段 0 bootstrap 不再无谓 shell 探测 (2026-06-30)
+
+观察到协调会话在 Windows 上做阶段 0 worktree bootstrap 时, 把 PowerShell 语法
+(`if (Test-Path ...) {...} else {...}` / `Get-Content` / `$LASTEXITCODE`)塞进 Bash 工具,
+触发 Git Bash 报 `syntax error near unexpected token '{'`。根因: `core/coordinator.md`
+只描述了 worktree marker 与 `active_run` 信号, 但**未规定用什么工具探测**, 且全文**零 shell 纪律**,
+导致 agent ① 无谓 shell 现探(`where` / `Test-Path` / `git worktree list`)② 混用 PowerShell/POSIX 语法。
+
+- **新增 §3.5 工具与 shell 纪律**(`core/coordinator.md`):判会话状态/读产物优先用结构化工具
+  (`active_run` 信号 + Read 工具), 不 shell 现探;必须执行命令时守"Bash 工具 != 系统原生 shell,
+  一条命令只用一种语法、绝不混写"红线(Windows 上 Bash 工具=Git Bash POSIX, 系统原生=PowerShell;
+  反斜杠/中文路径优先 PowerShell)。明确对 CC / OC 两宿主同等适用(OS 层差异, 与宿主无关)。
+- **收紧阶段 0 bootstrap 措辞**(`core/coordinator.md` §5 阶段 0):判"在不在 worktree"优先看注入的
+  `active_run`(权威信号), 需佐证再用 Read 工具读 marker, 显式禁止 `Test-Path`/`git worktree list`/
+  `where e2e-loop` 现探, 指向 §3.5。
+- **implementation-worker 同步补红线**(`core/subagents/implementation-worker.md` 第 3 步):worker
+  是独立上下文、看不到协调器 §3.5, 而它"跑测试到绿"必然 shell 出去, 同样暴露此坑;在跑测试/git 处
+  内联一条精简 shell 红线(同 §3.5 主旨)。
+- **传播**:已装到目标项目的 `.claude/skills/loop-engineering/SKILL.md` 为旧快照, 需 `e2e-loop
+  install --host cc --project-dir <target> --force` 重装方可生效(源仓库 `core/coordinator.md` 是 SSOT)。
+
 ### 新增 — 主 agent 不干活强制 (A+B 案, 2026-06-30)
 
 针对观察到的反复问题——主 agent 在 plan/implement 阶段绕过 Task 工具直接扮演 worker 写产物,

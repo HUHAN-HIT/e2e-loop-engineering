@@ -41,7 +41,7 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 ### 职责
 1. 读 packet 与 `context_paths` (必读切片); 若 `task_detail_path` 存在, 先读它。`acceptance_context` / `verification_map` / `review_focus` 只解释和映射 task-plan 中已有 AC/cases, 不是第二套验收标准; `dependency_artifacts` 按需自读 (只读你依赖的那条产物摘要)。除此之外不读, 尤其不通读仓库。
 2. 先写测试去满足 planned 的 checks (可先看到它失败, 但这是你自己的开发节奏, 不需要向任何人证明时序)。
-3. 实现代码, 跑测试到绿。改动严格限制在 `allowed_write_paths` 内。
+3. 实现代码, 跑测试到绿。改动严格限制在 `allowed_write_paths` 内。**跑测试/git 用 shell 时守一条红线: Bash 工具 != 系统原生 shell, 语法不通用 —— Windows 上 Bash 工具是 Git Bash (POSIX), 别把 `if (...) {...}` / `Test-Path` / `$LASTEXITCODE` / `2>$null` 这类 PowerShell 语法塞进去(会报 `syntax error near unexpected token '{'`)。要 PowerShell 语法走 PowerShell 工具, 要 POSIX 走 Bash 工具, 一条命令只用一种语法、绝不混写。**
 4. 产出三个文件:
    - `tasks/<id>/test-results.yaml`: `{ tests_green: bool, cases: [ {id, passed: bool, failure_reason: str} ] }` —— 每个 case **只准填这三个固定字段, 不得自创字段**: `passed` 供 coordinator 对 checks 机械求值 (求值规则参考 `@e2e-loop/ssot/checklists` 的 `evalCase`), `failure_reason` 仅供人读; 自创或未知字段会被判该 check 失败 + 告警。`actual_writes` **不要你报** —— coordinator 会从 git diff 自采。
    - `tasks/<id>/summary.md`: ≤1200 字, 说清做了什么、关键决策。

@@ -130,6 +130,19 @@ export interface HookInput {
   phase?: string;
   /** active task id 列表 */
   activeTasks?: string[];
+  /**
+   * 写者身份 (B 案新增, guard_paths 用). 来自 CC payload 的 agent_id/agent_type 字段.
+   *
+   * - "main": 主 agent 触发 (CC payload 无 agent_id 字段)
+   * - { agent_id, agent_type }: 子 agent 触发 (CC payload 在子 agent 内运行时下发)
+   * - undefined: 宿主未提供写者身份 (OC plugin runtime 无对应字段), guard_paths 退化到
+   *   只看 phase+task, 不做身份治理 (避免误锁 OC 主流程).
+   *
+   * 字段存在性判别权威: CC 官方文档
+   * https://code.claude.com/docs/en/hooks — agent_id 字段 "Present only when the hook
+   * fires inside a subagent call".
+   */
+  caller?: "main" | { agent_id: string; agent_type: string };
 }
 
 /** 统一 hook 出参 (宿主无关) */

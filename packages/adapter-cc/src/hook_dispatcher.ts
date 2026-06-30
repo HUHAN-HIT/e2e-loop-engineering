@@ -8,6 +8,7 @@ import {
   type HookOutput,
 } from "@e2e-loop/shared";
 import {
+  buildCaller,
   coerceEvent,
   parseStdin,
   readStdin,
@@ -45,11 +46,15 @@ export function toDashHookName(name: HookName): DashHookName {
 
 function buildInput(name: HookName, payload: CCPayload): HookInput {
   const cwd = payload.cwd ?? process.cwd();
+  // caller 对所有 hook 一并翻译 (B 案 guard_paths 用; 其它 hook 字段就位但暂不消费).
+  // SessionStart/Stop 在主 agent 触发, agent_id 缺失, buildCaller 自然返回 "main".
+  const caller = buildCaller(payload);
   switch (name) {
     case "probe_and_gate":
       return {
         event: coerceEvent(payload.hook_event_name ?? "SessionStart"),
         cwd,
+        caller,
       };
     case "guard_paths":
       return {
@@ -57,6 +62,7 @@ function buildInput(name: HookName, payload: CCPayload): HookInput {
         toolName: payload.tool_name,
         toolInput: payload.tool_input ?? {},
         cwd,
+        caller,
       };
     case "post_task_collect":
       return {
@@ -65,11 +71,13 @@ function buildInput(name: HookName, payload: CCPayload): HookInput {
         toolInput: payload.tool_input ?? {},
         toolResponse: payload.tool_response ?? {},
         cwd,
+        caller,
       };
     case "guard_anchors":
       return {
         event: coerceEvent(payload.hook_event_name ?? "Stop"),
         cwd,
+        caller,
       };
   }
 }

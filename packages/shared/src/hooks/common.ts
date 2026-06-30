@@ -63,6 +63,32 @@ export function classifyWorker(toolInput: unknown): WorkerName | null {
 }
 
 // ---------------------------------------------------------------------------
+// 写者身份 (B 案新增, guard_paths 用)
+// ---------------------------------------------------------------------------
+
+/**
+ * 判定 hook 调用方是否为主 agent (B 案新增).
+ *
+ * - caller === "main" → true (主 agent 直接调工具)
+ * - caller === { agent_id, ... } → false (子 agent 调工具)
+ * - caller === undefined → true (宿主未提供身份信息, 保守按主 agent 处理)
+ *
+ * 设计取舍: undefined 默认 "main" 而非 "worker":
+ *   1. guard_paths 在 caller===undefined 时单独判定是否进入身份治理 (见 ruleWriterIdentity);
+ *      真要做身份治理时, undefined 视为主 agent 才能拦住"主 agent 借未支持宿主绕过分派".
+ *   2. CC 真子 agent 一定带 agent_id; 真正的 worker 不会被误判.
+ *
+ * 注意: guard_paths 当前实现是 caller===undefined 时**跳过**身份治理 (OC 退化), 与
+ * 本函数无关; 本函数仅供未来扩展 (post_task_collect / guard_anchors 等) 复用.
+ */
+export function isMainAgent(
+  input: Pick<HookInput, "caller">,
+): boolean {
+  if (input.caller === undefined) return true;
+  return input.caller === "main";
+}
+
+// ---------------------------------------------------------------------------
 // run-state / task-plan 读取
 // ---------------------------------------------------------------------------
 

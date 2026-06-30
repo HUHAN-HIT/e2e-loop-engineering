@@ -75,6 +75,12 @@ function isWriteTool(tool: string | undefined): boolean {
  *   - handleGuardPaths 调用包在 safeRun 里: 读 run-state / task-plan 等内部错误 → undefined → 放行。
  *   - 拿到 out 后, 在 safeRun 之外调 hookOutputToThrow(out): deny 时 throw 拦截工具。
  *     这样"内部错误退化放行"与"有意 deny 拦截"严格分离。
+ *
+ * B 案 caller 字段未传 (OC plugin runtime 的 OcToolInputMeta 无 agent_id/agent_type 等价物):
+ *   - HookInput.caller 字段缺, guard_paths 的 ruleWriterIdentity 在 caller===undefined 时
+ *     跳过身份治理, 退化到原 phase+task 路径白名单 (见 shared/src/hooks/guard_paths/logic.ts).
+ *   - 这是已知跨宿主差异: CC 端有写者身份物理强制, OC 端仅靠提示词纪律 (§1.5 角色边界).
+ *     理由: OC 当前没有子 agent 概念, 主 agent 直接执行所有任务, 强行身份治理会锁死工作流.
  */
 async function beforeGuardPaths(
   meta: OcToolInputMeta,
@@ -85,6 +91,7 @@ async function beforeGuardPaths(
 
   const args = output.args ?? {};
   // OC write/edit 入参: filePath / content。翻译成 shared 期望的 toolInput.file_path。
+  // caller 字段不传: OC 无 agent_id 等价物, guard_paths 据此退化身份治理.
   const input: HookInput = {
     event: "PreToolUse",
     toolName: "Write",

@@ -53,6 +53,16 @@ function parseDecision(stdout: string): "allow" | "block" | "defer" {
   return typeof addCtx === "string" ? "defer" : "allow";
 }
 
+/** 提取 hookSpecificOutput.hookEventName (CC 协议必填字段, 见 runtime.ts)。 */
+function hookEventNameOf(stdout: string): string | undefined {
+  const trimmed = stdout.trim();
+  if (!trimmed) return undefined;
+  const obj = JSON.parse(trimmed) as Record<string, unknown>;
+  return (obj.hookSpecificOutput as Record<string, unknown> | undefined)?.hookEventName as
+    | string
+    | undefined;
+}
+
 test("CLI hook: probe-and-gate 接收 Claude Code stdin 且不需要宿主参数", () => {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "loop-cli-hook-"));
   try {
@@ -63,6 +73,8 @@ test("CLI hook: probe-and-gate 接收 Claude Code stdin 且不需要宿主参数
     });
     expect(r.status).toBe(0);
     expect(parseDecision(r.stdout)).toBe("defer");
+    // CC 协议硬约束: hookSpecificOutput.hookEventName 必填
+    expect(hookEventNameOf(r.stdout)).toBe("SessionStart");
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }
@@ -78,6 +90,7 @@ test("CLI hook: 下划线别名行为一致", () => {
     });
     expect(r.status).toBe(0);
     expect(parseDecision(r.stdout)).toBe("defer");
+    expect(hookEventNameOf(r.stdout)).toBe("SessionStart");
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }

@@ -169,7 +169,13 @@ function makeImplRun(repoRoot: string, runId: string): void {
   process.env.LOOP_RUNS_ROOT = runsRoot;
 }
 
-/** CC binding 形状: 直接调 shared.handleGuardPaths, 返回 decision。 */
+/**
+ * CC binding 形状: 直接调 shared.handleGuardPaths, 返回 decision。
+ *
+ * 注意: 不传 caller (即 caller=undefined). 这模拟"B 案身份治理未触发"的视角,
+ * 等价于 OC 的退化路径. 用于 (b) 组验证路径白名单规则(规则 1-10)在两宿主一致,
+ * 不验证 B 案身份治理差异(后者见 (c) 组的 ccMainAgentDecision).
+ */
 async function ccDecision(
   repoRoot: string,
   absFilePath: string,
@@ -264,4 +270,90 @@ test("(b) 越界源码 docs/x.md: CC deny ⟺ OC throw (白名单越界两宿主
   expect(ocr.threw).toBe(true);
   // 同一 logic: 越界拒绝 reason 含 allowed_write_paths
   expect(ocr.msg).toContain("allowed_write_paths");
+});
+
+// ===========================================================================
+// (c) 已知跨宿主差异 (B 案身份治理, 显式测试避免被误认为 bug)
+//
+// B 案 guard_paths 写者身份治理在 CC 端生效 (caller="main" 时主 agent 写 worker 红线路径
+// 或写源码 → deny), OC 端降级 (caller=undefined → 跳过身份治理, 退化到原 phase+task 治理).
+// 这是设计选择不是 bug: OC 当前无子 agent 概念, 主 agent 直接执行所有任务, 强行身份治理
+// 会锁死工作流. 详见 shared/src/hooks/guard_paths/logic.ts ruleWriterIdentity 注释.
+// ===========================================================================
+
+/** CC binding 形状: 主 agent (caller="main") 写文件, 返回 decision. */
+async function ccMainAgentDecision(
+  repoRoot: string,
+  absFilePath: string,
+): Promise<"allow" | "deny" | "defer"> {
+  const input: HookInput = {
+    event: "PreToolUse",
+    toolName: "Write",
+    toolInput: { file_path: absFilePath, content: "x" },
+    cwd: repoRoot,
+    caller: "main",
+  };
+  const out = await handleGuardPaths(input);
+  return out.decision;
+}
+
+test("(c) B 案差异: CC 主 agent 写 planning/design.md → CC deny; OC 退化放行 (无身份治理)", async () => {
+  // 用 PLANNING run (场景里 makeImplRun 是 IMPLEMENTING; 这里临时自建 PLANNING run)
+  function makePlanningRun(repoRoot: string, runId: string): void {
+    const runsRoot = path.join(repoRoot, "runs");
+    const runDir = path.join(runsRoot, runId);
+    fs.mkdirSync(path.join(runDir, "planning"), { recursive: true });
+    fs.writeFileSync(
+      path.join(runDir, "run-state.json"),
+      JSON.stringify({
+        run_id: runId,
+        phase: "PLANNING",
+        complexity: "simple",
+        trust_mode: "collaborative",
+        active_tasks: [],
+      }),
+      "utf-8",
+    );
+    process.env.LOOP_RUNS_ROOT = runsRoot;
+  }
+
+  const targetRel = path.join("runs", "20260101-001", "planning", "design.md");
+
+  // CC 侧 (caller="main"): B 案身份治理生效 → deny
+  const ccRepo = tmpRoot("c1-cc");
+  makePlanningRun(ccRepo, "20260101-001");
+  const ccd = await ccMainAgentDecision(ccRepo, path.join(ccRepo, targetRel));
+  expect(ccd).toBe("deny");
+
+  // OC 侧 (caller=undefined): 退化, 不做身份治理 → allow (规则 6 PLANNING 放行)
+  const ocRepo = tmpRoot("c1-oc");
+  makePlanningRun(ocRepo, "20260101-001");
+  const ocr = await ocBefore(ocRepo, path.join(ocRepo, targetRel));
+  expect(ocr.threw).toBe(false);
+});
+
+test("(c) B 案差异: CC 主 agent 写 src/foo.ts (IMPLEMENTING) → CC deny; OC 退化放行", async () => {
+  const srcRel = path.join("src", "foo.ts");
+
+  // CC 侧 (caller="main"): 规则 9 主 agent 写源码 deny
+  const ccRepo = tmpRoot("c2-cc");
+  makeImplRun(ccRepo, "20260101-001");
+  const ccd = await ccMainAgentDecision(ccRepo, path.join(ccRepo, srcRel));
+  expect(ccd).toBe("deny");
+  // reason 含可执行指引
+  const input: HookInput = {
+    event: "PreToolUse",
+    toolName: "Write",
+    toolInput: { file_path: path.join(ccRepo, srcRel), content: "x" },
+    cwd: ccRepo,
+    caller: "main",
+  };
+  const out = await handleGuardPaths(input);
+  expect(out.reason ?? "").toContain("implementation-worker");
+
+  // OC 侧 (caller=undefined): 退化, 走原 allowed_write_paths 检查 → allow
+  const ocRepo = tmpRoot("c2-oc");
+  makeImplRun(ocRepo, "20260101-001");
+  const ocr = await ocBefore(ocRepo, path.join(ocRepo, srcRel));
+  expect(ocr.threw).toBe(false);
 });

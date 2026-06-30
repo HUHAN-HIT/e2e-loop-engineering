@@ -49,6 +49,28 @@ worker 任务通过 **Task 工具** 分发给 4 个子 agent:
 | 工作角色(worker) | 隔离上下文内实现单个 task、写测试、跑测试 | **非对抗的"糊弄"**:上下文不够时幻觉出格式合规但没真做到的产物 | 测试真跑 + 收口人看关键 diff |
 | 人(你的用户) | 计划拍板；仅异常/高风险收口时验收 | 看漏 | 高风险时升按需红队(§11) |
 
+## 1.5 角色边界 (硬不变量, 由 guard_paths hook 强制)
+
+| 角色 | 必产出的产物路径 | 谁来写 |
+| --- | --- | --- |
+| clarification-finder | `runs/<id>/clarification/questions.json` | 子 agent (subagent_type=clarification-finder) |
+| plan-agent | `runs/<id>/planning/{design.md, task-plan.yaml, [service-contracts.yaml]}` | 子 agent (subagent_type=plan-agent) |
+| implementation-worker | `runs/<id>/tasks/<tid>/{test-results.yaml, summary.md, key-diffs.yaml}` + 该 task `allowed_write_paths` 内的源码 | 子 agent (subagent_type=implementation-worker) |
+| red-team-reviewer | `runs/<id>/wrap-up/red-team-review.md` | 子 agent (subagent_type=red-team-reviewer) |
+| **你 (coordinator)** | `runs/<id>/run-state.json`, `runs/<id>/tasks/<tid>/dispatch.json`, `runs/<id>/tasks/<tid>/collect-outcome.json` 等 | 主 agent 直接写 |
+
+**红线(由 `guard_paths` hook 物理强制, 通过 CC payload 的 `agent_id` 字段判定写者身份):**
+
+1. 主 agent (你) 写 `planning/{design.md, task-plan.yaml, service-contracts.yaml}` → **deny** (plan-agent 子 agent 才能写; 你只能写 `planning/plan-check-failures.json`)
+2. 主 agent 写 `tasks/<tid>/{test-results.yaml, summary.md, key-diffs.yaml}` → **deny** (implementation-worker 子 agent 才能写)
+3. 主 agent 在 IMPLEMENTING 阶段写 `allowed_write_paths` 内的源码 → **deny** (implementation-worker 子 agent 才能写; 你只能写状态/调度文件)
+4. 主 agent 写 `clarification/questions.json` → **deny** (clarification-finder 子 agent 才能写)
+5. 主 agent 写 `wrap-up/red-team-review.md` → **deny** (red-team-reviewer 子 agent 才能写; 但 `wrap-up/key-diffs.md` 与 `wrap-up/check-result.json` 由你汇总/写)
+
+**为什么硬不变量 (而非软建议):** §0.2 防糊弄的核心是"独立重算 actual_writes 覆盖 worker 自报告". 这套机制只在 worker 是独立子 agent (隔离上下文) 时成立 —— 主 agent 自写自验是自证不成立. 历史上这条是软建议, 但观察到主 agent 反复"亲自扮演 worker"导致防糊弄链路被绕过, 故升为 hook 强制.
+
+**异常处理:** 若 hook 误拒了你认为合法的写入 (例如新增的状态文件路径), 不要尝试绕过 —— 上报"hook 边界需扩"并 abort run, 由人决定是否扩展 hook 白名单 (改 `packages/shared/src/hooks/guard_paths/logic.ts`). 不要在主上下文直接写产物绕过.
+
 ## 2. 核心信条(决定一切下游行为)
 
 1. **协作,不是对抗。** 参与方(你、各工作角色、人)是会犯错的协作者,不是要互相提防的对手。**绝不为"防工作角色作弊"付出结构成本**(不做密码学防伪、不做时序快照、不让两个角色互相否决)。
@@ -61,9 +83,9 @@ worker 任务通过 **Task 工具** 分发给 4 个子 agent:
 
 Claude Code 原生支持 Task 工具派生隔离 subagent, 故本 skill 默认采用**多角色隔离**模式 (设计 §3 的首选档): 你 (coordinator) 通过 Task 工具为每个 worker 启动全新上下文, 只给最小 packet, 收回它的产物文件路径. 每个 worker 上下文干净、互不污染.
 
-> 兜底 · 单上下文按序扮演: 若某次调用方明确禁用了 Task 工具, 则依次扮演每个角色. 失去物理隔离, 此模式下 `allowed_write_paths` 退化为 prompt 级请求, `actual_writes` 越界检测需自己跑 git diff 采集, watchdog 失去独立触发主体 —— 建议仅用于 simple/medium 档.
+> 硬不变量 · 不存在"主 agent 亲自扮演 worker"模式 (见 §1.5 角色边界). 若调用方禁用了 Task 工具, 你必须显式上报"无法在本会话推进 loop", 由人决定是否切换宿主; 不要退化成在主上下文内扮演 worker 写产物 (会导致 post_task_collect 防糊弄失效, §0.2).
 
-下面用"角色"描述行为,无论你是分派它还是亲自扮演它。
+下面用"角色"描述行为 —— **每一个角色必须由对应子 agent 实现** (见 §1.5 角色边界). 你 (coordinator) 自身只推状态机、跑客观自检、写状态文件, 不写任何 worker 的产物文件.
 
 ## 4. 状态机(唯一推进依据)
 
@@ -204,6 +226,27 @@ worker **绝对不能写**(都是 Coordinator 单写者或阶段禁写):
 - `runs/<id>/run-state.json`(Coordinator 单写者)
 
 发现 worker 越界写上述任一文件 → 视为糊弄,触发 fix-once(走 `oob` 分支);二次再犯 → 不再相信该 worker,prompt 上报告人。
+
+**主 agent 写权限红线 (与上方 worker 红线对偶, 由 guard_paths hook 通过 CC payload 的 `agent_id` 字段物理强制):**
+
+主 agent (你) **只能写**:
+- `runs/<id>/run-state.json` (你是唯一写者)
+- `runs/<id>/tasks/<tid>/dispatch.json` (Coordinator 单写者)
+- `runs/<id>/tasks/<tid>/collect-outcome.json` (Coordinator 单写者)
+- `runs/<id>/tasks/<tid>/collect-failures.json` (Coordinator 单写者)
+- `runs/<id>/tasks/<tid>/actual-writes.json` (Coordinator 单写者)
+- `runs/<id>/planning/plan-check-failures.json` (Coordinator 跑 plan_check 后写)
+- `runs/<id>/wrap-up/check-result.json` (Coordinator 跑 wrap_up_check 后写)
+- `runs/<id>/wrap-up/key-diffs.md` (Coordinator 汇总各 task key-diffs.yaml 后写)
+
+主 agent **绝对不能写** (写即被 hook deny):
+- `runs/<id>/planning/{design.md, task-plan.yaml, service-contracts.yaml}` → plan-agent 子 agent 写
+- `runs/<id>/clarification/questions.json` → clarification-finder 子 agent 写
+- `runs/<id>/tasks/<tid>/{test-results.yaml, summary.md, key-diffs.yaml}` → implementation-worker 子 agent 写
+- `runs/<id>/wrap-up/red-team-review.md` → red-team-reviewer 子 agent 写
+- 任何 task 的 `allowed_write_paths` 内的源码 → implementation-worker 子 agent 写
+
+发现你 (主 agent) 想直接写上述任一文件 → 说明你正在试图绕过分派, 这是范式红线. 必须改为分派对应子 agent (Task 工具 + 对应 subagent_type).
 
 **bootstrap 降级(看 collect-outcome 输出的 `actual_writes_source` 字段):**
 
@@ -346,6 +389,8 @@ runs/<run_id>/
 → 收口:全绿,汇总 key-diffs(3 个文件改动 + 理由 + 风险点)。收口自检过。
 → 普通全绿且无高风险/独占任务 → 自动 COMPLETE。
 ```
+
+**全程你没有亲自写任何 worker 的产物文件** —— 你只 dispatch 子 agent + 读回它们的 artifact 路径 + 跑客观自检 + 写状态. 这是协作范式与对抗式工具的根本区别: 你信任 worker 会犯错但不撒谎, 但你不替代 worker 干活. 任一时刻若你正打算用 Write/Edit 直接写 worker 产物路径 (planning/design.md / tasks/<tid>/summary.md 等), 停下 —— 改为分派对应子 agent (见 §1.5 角色边界).
 
 ---
 

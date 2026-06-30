@@ -13,7 +13,7 @@
  *   - stdout:
  *       allow → 空字符串
  *       deny  → {"decision":"block","reason":"..."}
- *       defer → {"hookSpecificOutput":{"additionalContext":"<JSON 字符串>"}}
+ *       defer → {"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"<JSON 字符串>"}}
  *
  * 覆盖矩阵 (8 用例):
  *   probe_and_gate (SessionStart):
@@ -259,6 +259,12 @@ test("probe_and_gate: 无活跃 run → defer + capabilities 注入", () => {
   const d = parseDecision(r.stdout);
   expect(d.kind).toBe("defer");
   if (d.kind !== "defer") return;
+  // CC 协议硬约束: hookSpecificOutput.hookEventName 必填, 缺失会被 CC 校验拒收
+  // (回归锚点: 历史上有版本漏掉该字段, 见 runtime.ts hookOutputToCCStdout docstring)
+  const raw = JSON.parse(r.stdout.trim()) as Record<string, unknown>;
+  expect(
+    (raw.hookSpecificOutput as Record<string, unknown> | undefined)?.hookEventName,
+  ).toBe("SessionStart");
   const caps = d.context.capabilities as Record<string, unknown> | undefined;
   expect(caps).toBeDefined();
   expect(typeof caps!.git_diff).toBe("boolean");

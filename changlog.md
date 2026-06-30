@@ -7,6 +7,43 @@
 
 首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
 
+### 新增 — 主 agent 不干活强制 (A+B 案, 2026-06-30)
+
+针对观察到的反复问题——主 agent 在 plan/implement 阶段绕过 Task 工具直接扮演 worker 写产物,
+导致 post_task_collect 防糊弄链路被绕过——做提示词层 (A 案) 与 hook 层 (B 案) 的纵深强制:
+
+- **CC 协议合规修复 (前置, B 案基础):** `packages/adapter-cc/src/runtime.ts` 的
+  `hookOutputToCCStdout` 在 defer 路径强制带 `hookSpecificOutput.hookEventName` (CC 必填字段,
+  官方文档 https://code.claude.com/docs/en/hooks 明示; 缺失会被 CC 校验拒收并报
+  "hookSpecificOutput is missing required field 'hookEventName'"); 函数签名加 `event` 参数,
+  `runBinding` 调用处同步更新. `tests-ts/cli_hook_command.test.ts` (新增 `hookEventNameOf`
+  辅助) 与 `tests-ts/hook_binding_e2e.test.ts` (probe_and_gate defer 用例) 各加一条断言作
+  回归锚点.
+- **A 案 · 提示词强化 (`core/coordinator.md`):** 删除"兜底 · 单上下文按序扮演"逃生通道;
+  改"无论你是分派它还是亲自扮演它"为"每一个角色必须由对应子 agent 实现"; 新增 §1.5 角色边界段
+  (5 条 hook 强制红线, 列明哪个角色写哪些路径); §3 补充"主 agent 写权限红线"对偶段;
+  §13 末尾加全程强调.
+- **B 案 · hook 写者身份治理 (`packages/shared/src/hooks/guard_paths/logic.ts`):**
+  新增 `ruleWriterIdentity` (规则 0) — 基于 CC payload 的 `agent_id` 字段判定写者身份,
+  `caller="main"` 时主 agent 写 worker 红线路径 (planning/design.md / tasks/<tid>/summary.md /
+  clarification/questions.json / wrap-up/red-team-review.md / IMPLEMENTING 源码) 一律 deny,
+  reason 含可执行指引 (建议改用 Task 工具分派对应 subagent_type). `caller=undefined` (OC 等
+  未提供身份信息的宿主) 时跳过身份治理, 退化到原 phase+task 路径白名单 (避免锁死 OC 工作流).
+- **B 案 · 数据模型 (`packages/shared/src/types.ts`):** `HookInput` 新增 `caller` 字段
+  (`"main" | { agent_id, agent_type } | undefined`), 来自 CC payload 的 agent_id/agent_type.
+- **B 案 · CC binding (`packages/adapter-cc/src/runtime.ts` + `hook_dispatcher.ts`):**
+  `CCPayload` 接收 `agent_id`/`agent_type`, 新增 `buildCaller(p)` 把 payload 翻译成
+  `HookInput.caller`, 4 个 hook 的 buildInput 一并传 caller.
+- **B 案 · common 辅助 (`packages/shared/src/hooks/common.ts`):** 新增 `isMainAgent(input)`
+  辅助, 供未来其它 hook 复用身份判定.
+- **B 案 · 测试 (`tests-ts/guard_paths_writer_identity.test.ts` 新增):** W1-W10c 共 16 个用例
+  覆盖主 agent deny / 子 agent allow / OC 退化 三种 caller 维度; `tests-ts/cross_host_consistency.test.ts`
+  新增 (c) 组显式记录 B 案引入的跨宿主差异 (CC 主 agent 写源码/planning/design.md → deny;
+  OC caller=undefined → allow), 与既有 (b) 组"路径白名单规则一致"叙事分离.
+- **B 案 · OC 降级注释 (`packages/adapter-oc/src/plugin/index.ts`):** `beforeGuardPaths` 加
+  caller=undefined 由来注释, 说明 OC plugin runtime 无 agent_id/agent_type 等价物, 身份治理
+  仅在 CC 端生效 (这是已知跨宿主差异, 非缺陷).
+
 ### 修复 — worktree 早停加固 (2026-06-29)
 
 针对"协调器把上下文压缩信号 (StrategicCompact) 误读成停止指令而早停"与"Stop hook 在 git worktree 里

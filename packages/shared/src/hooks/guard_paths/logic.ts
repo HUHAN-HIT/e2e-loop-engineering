@@ -2,8 +2,10 @@
  * B. PreToolUse:Write/Edit —— 路径白名单 (规范源: design §0.4 artifact-first;
  * 行为权威: Python `hooks/loop_engineering/guard_paths.py`)。
  *
- * 按 file_path 前缀判定合法性。当前 phase + 当前活跃 task 决定哪些路径可写。
- * 8 条规则 (按前缀匹配, 第一个命中生效):
+ * 按 file_path 前缀判定合法性。当前 phase + 当前活跃 task + 写者身份 决定哪些路径可写。
+ * 规则 (按前缀匹配, 第一个命中生效):
+ *   0. (B 案新增) 写者身份治理: 主 agent 写 worker 红线路径 → deny (caller="main" 时生效;
+ *      caller=undefined 时跳过本规则, OC 退化到原 phase+task 治理)
  *   1. <repo>/.claude/**              → 永远 deny (保护 skill/agent/hook 自身)
  *   2. <repo>/loop_engineering/**     → 永远 deny (保护 Python SSOT)
  *   3. <repo>/.opencode/**            → 永远 deny (保护 OC 资产)
@@ -13,7 +15,8 @@
  *   7. <repo>/runs/<id>/clarification/** → 仅在 phase ∈ {CREATED, CLARIFYING}
  *   8. <repo>/runs/<id>/wrap-up/**    → 仅在 phase = WRAPPING_UP
  *   9. 其它 <repo>/**                  → 仅在 phase=IMPLEMENTING 且 active task 的
- *                                        allowed_write_paths 覆盖该路径
+ *                                        allowed_write_paths 覆盖该路径;
+ *                                        (B 案) 主 agent 写源码 → deny
  *   10. 其它                            → deny
  *
  * 性能: 每次 Write/Edit 都触发。task-plan 读取加 module-level 缓存 (mtime 失效),
@@ -177,8 +180,13 @@ function ruleWrapUp(rel: string, phase: string): string | null {
   return null;
 }
 
-/** 规则 9: 源码 (排除上面 8 类), 仅 IMPLEMENTING 且 active task 覆盖。 */
-function ruleSource(rel: string, phase: string, active: Task | null): string | null {
+/** 规则 9: 源码 (排除上面 8 类), 仅 IMPLEMENTING 且 active task 覆盖; 主 agent 写源码 deny (B 案)。 */
+function ruleSource(
+  rel: string,
+  phase: string,
+  active: Task | null,
+  caller: HookInput["caller"],
+): string | null {
   if (rel.startsWith("runs/")) {
     // runs/ 下但没被前 8 条匹配 (不规范子路径) → deny
     return `runs/ 内未识别子路径: ${rel}`;
@@ -189,13 +197,122 @@ function ruleSource(rel: string, phase: string, active: Task | null): string | n
   if (active === null) {
     return "源码写入被拒: IMPLEMENTING 但找不到 status=running 的 task";
   }
-  // 检查 task.allowed_write_paths 是否覆盖目标 (matchPath 与 Python path_globs_overlap 等价)
+  // B 案新增: 主 agent 写源码 deny. caller=undefined 时跳过本检查 (OC 退化到原逻辑).
+  if (caller === "main") {
+    return (
+      `主 agent 写源码 ${rel} 被拒: IMPLEMENTING 阶段所有源码改动必须由 ` +
+      "implementation-worker 子 agent 产出. 请改用 Task 工具分派 (subagent_type=implementation-worker). " +
+      "见 SKILL §1.5 角色边界."
+    );
+  }
+  // 子 agent (implementation-worker) 写: 检查 allowed_write_paths
   const covered = active.allowed_write_paths.some((glob) => matchPath(glob, rel));
   if (covered) return "ALLOW";
   return (
     `源码写入被拒: 路径 ${rel} 不在当前 task ${active.id} 的 ` +
     `allowed_write_paths=[${active.allowed_write_paths.join(", ")}] 范围内`
   );
+}
+
+// ---------------------------------------------------------------------------
+// 规则 0 (B 案新增): 写者身份治理
+// ---------------------------------------------------------------------------
+
+/**
+ * 主 agent 直接写 worker 红线路径 → deny. 这是"主 agent 不干活"红线的物理强制.
+ *
+ * worker 红线路径 (主 agent 不能写):
+ *   - planning/{design.md, task-plan.yaml, service-contracts.yaml} (主 agent 仅可写
+ *     planning/plan-check-failures.json — Coordinator 跑 plan_check 的产物)
+ *   - clarification/questions.json
+ *   - tasks/<tid>/{test-results.yaml, summary.md, key-diffs.yaml} (worker 产物;
+ *     dispatch.json / collect-*.json / actual-writes.json 仍由主 agent 写)
+ *   - wrap-up/red-team-review.md (主 agent 仍可写 wrap-up/key-diffs.md 与
+ *     wrap-up/check-result.json, 这是 Coordinator 汇总/检查产物)
+ *
+ * 跳过条件:
+ *   - caller === undefined: 宿主未提供身份信息 (OC), 退化到原 phase+task 治理, 不做身份判定.
+ *   - caller !== "main" (即子 agent): 身份治理不拦, 后续规则 1-10 继续生效.
+ *
+ * 设计取舍: caller=undefined 跳过而非按主 agent 处理, 是因为 OC 当前没有子 agent 概念,
+ * 主 agent 直接执行所有任务, 强行身份治理会锁死整个 OC 工作流. CC 真子 agent 一定带
+ * agent_id, 故 CC 端主 agent 写一定走 caller="main" 分支被治理.
+ */
+function ruleWriterIdentity(
+  rel: string,
+  caller: HookInput["caller"],
+): string | null {
+  // OC 等宿主无身份信息 → 跳过身份治理, 退化到原 phase+task 治理
+  if (caller === undefined) return null;
+  // 子 agent 写: 身份治理不拦 (路径白名单规则 1-10 会继续生效)
+  if (caller !== "main") return null;
+
+  // 主 agent 写: 检查是否落在 worker 红线路径
+  const parts = rel.split("/");
+
+  // planning/** 主 agent 只能写 plan-check-failures.json
+  if (parts.length >= 3 && parts[0] === "runs" && parts[2] === "planning") {
+    const leaf = parts[parts.length - 1];
+    if (leaf !== "plan-check-failures.json") {
+      return (
+        `主 agent 写 ${rel} 被拒: planning/{design.md, task-plan.yaml, ` +
+        "service-contracts.yaml} 必须由 plan-agent 子 agent 产出. 主 agent 仅可写 " +
+        "planning/plan-check-failures.json. 请改用 Task 工具分派 plan-agent " +
+        "(subagent_type=plan-agent). 见 SKILL §1.5 角色边界."
+      );
+    }
+    return null;
+  }
+
+  // clarification/** 主 agent 不能写
+  if (
+    parts.length >= 3 &&
+    parts[0] === "runs" &&
+    parts[2] === "clarification"
+  ) {
+    return (
+      `主 agent 写 ${rel} 被拒: clarification/questions.json 必须由 clarification-finder ` +
+      "子 agent 产出. 请改用 Task 工具分派 (subagent_type=clarification-finder). " +
+      "见 SKILL §1.5 角色边界."
+    );
+  }
+
+  // tasks/<tid>/{test-results,summary,key-diffs}.* 主 agent 不能写
+  if (parts.length >= 4 && parts[0] === "runs" && parts[2] === "tasks") {
+    const leaf = parts[parts.length - 1];
+    const workerArtifacts = [
+      "test-results.yaml",
+      "summary.md",
+      "key-diffs.yaml",
+    ];
+    if (workerArtifacts.includes(leaf)) {
+      return (
+        `主 agent 写 ${rel} 被拒: tasks/<tid>/{test-results.yaml, summary.md, ` +
+        "key-diffs.yaml} 必须由 implementation-worker 子 agent 产出. " +
+        "请改用 Task 工具分派 (subagent_type=implementation-worker). " +
+        "见 SKILL §1.5 角色边界."
+      );
+    }
+    // dispatch.json / collect-*.json / actual-writes.json: 主 agent 可写, 放行
+    return null;
+  }
+
+  // wrap-up/red-team-review.md 主 agent 不能写
+  if (parts.length >= 3 && parts[0] === "runs" && parts[2] === "wrap-up") {
+    const leaf = parts[parts.length - 1];
+    if (leaf === "red-team-review.md") {
+      return (
+        `主 agent 写 ${rel} 被拒: wrap-up/red-team-review.md 必须由 red-team-reviewer ` +
+        "子 agent 产出. 请改用 Task 工具分派 (subagent_type=red-team-reviewer). " +
+        "见 SKILL §1.5 角色边界."
+      );
+    }
+    // wrap-up/check-result.json / wrap-up/key-diffs.md: 主 agent 可写 (Coordinator 汇总/检查)
+    return null;
+  }
+
+  // 其它路径 (源码等): 不在本规则治理范围, 留给规则 9 (ruleSource) 处理主 agent 写源码的 deny
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +355,13 @@ export async function handle(input: HookInput): Promise<HookOutput> {
     if (!GOVERNING_PHASES.has(phase)) {
       // COMPLETE / ABORTED / 异常 phase → run 已终态, 不再治理写入
       return passSilent();
+    }
+
+    // 规则 0 (B 案): 写者身份治理 — 在所有路径规则之前判定
+    // caller=undefined (OC) 时跳过; caller="main" 时拦主 agent 写 worker 红线路径.
+    const idMsg = ruleWriterIdentity(rel, input.caller);
+    if (idMsg !== null) {
+      return deny(`路径白名单拒绝(写者身份): ${fp} (${idMsg})`);
     }
 
     // 规则 1-3: 受保护目录
@@ -285,7 +409,7 @@ export async function handle(input: HookInput): Promise<HookOutput> {
     // 规则 9: 源码 (active task 仅 IMPLEMENTING 时取)
     const active2 =
       phase === "IMPLEMENTING" ? findActiveTask(plan, state) : null;
-    msg = ruleSource(rel, phase, active2);
+    msg = ruleSource(rel, phase, active2, input.caller);
     if (msg === "ALLOW") return passSilent();
     return deny(`路径白名单拒绝: ${fp} (${msg})`);
   } catch (e) {
@@ -299,11 +423,23 @@ export async function handle(input: HookInput): Promise<HookOutput> {
  *   1. 无活跃 run + 写任意路径 → allow (loop 之外不干扰)
  *   2. IMPLEMENTING + 写 .claude/x → deny; reason 含 ".claude"
  *   3. IMPLEMENTING + 写 loop_engineering/x → deny; reason 含 "loop_engineering"
- *   4. IMPLEMENTING + active task allowed=["src/**"] + 写 src/foo.ts → allow
+ *   4. IMPLEMENTING + active task allowed=["src/**"] + 写 src/foo.ts (caller=undefined/OC 或子 agent) → allow
  *   5. IMPLEMENTING + active task allowed=["src/**"] + 写 docs/x.md → deny; reason 含 "allowed_write_paths"
- *   6. PLANNING + 写 planning/design.md → allow
+ *   6. PLANNING + 写 planning/design.md (caller=undefined/OC 或子 agent) → allow
  *   7. IMPLEMENTING + 写 planning/design.md → deny; reason 含 "CREATED/CLARIFYING/PLANNING"
  *   8. 写 runs/<id>/run-state.json → allow (协调者写状态)
- *   9. IMPLEMENTING + 写 runs/<id>/tasks/<tid>/summary.md (tid=active) → allow
+ *   9. IMPLEMENTING + 写 runs/<id>/tasks/<tid>/summary.md (tid=active, caller=undefined/OC 或子 agent) → allow
  *   10. 内部异常 → deny (不静默放过)
+ *
+ * B 案新增 (写者身份治理, 见 guard_paths_writer_identity.test.ts):
+ *   W1. caller="main" + 写 planning/design.md → deny; reason 含 "plan-agent"
+ *   W2. caller="main" + 写 planning/plan-check-failures.json → allow
+ *   W3. caller={agent_id, agent_type} + 写 planning/design.md (PLANNING) → allow
+ *   W4. caller="main" + 写 tasks/<tid>/summary.md (IMPLEMENTING, tid=active) → deny; reason 含 "implementation-worker"
+ *   W5. caller="main" + 写 clarification/questions.json (CLARIFYING) → deny; reason 含 "clarification-finder"
+ *   W6. caller="main" + 写 wrap-up/red-team-review.md (WRAPPING_UP) → deny; reason 含 "red-team-reviewer"
+ *   W7. caller="main" + 写 wrap-up/key-diffs.md (WRAPPING_UP) → allow (Coordinator 汇总)
+ *   W8. caller="main" + IMPLEMENTING + 写源码 src/foo.ts → deny; reason 含 "implementation-worker"
+ *   W9. caller="main" + 写 run-state.json → allow
+ *   W10. caller=undefined (OC 模拟) + 写 planning/design.md (PLANNING) → allow (退化, 不做身份治理)
  */

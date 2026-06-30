@@ -8,8 +8,10 @@
  * 协议要点 (行为权威: Python `hooks/loop_engineering/common.py`):
  *   - allow → stdout 空 (静默放行) 或 `{}`
  *   - deny  → `{"decision": "block", "reason": "..."}`
- *   - defer → `{"hookSpecificOutput": {"additionalContext": <JSON.stringify(context)>}}`
- *             (放行 + 下一轮提示词注入)
+ *   - defer → `{"hookSpecificOutput": {"hookEventName": <event>, "additionalContext": <JSON.stringify(context)>}}`
+ *             (放行 + 下一轮提示词注入; hookEventName 必填, 见官方文档
+ *              https://code.claude.com/docs/en/hooks — 缺失会被校验拒收并报
+ *              "hookSpecificOutput is missing required field 'hookEventName'")
  *   - sideEffect → binding 层负责落盘 (fs.writeFileSync)
  *
  * fail-safe: binding 任何异常都 try/catch, 静默放行 (CC hook 不锁死会话)。
@@ -30,6 +32,14 @@ export interface CCPayload {
   tool_response?: Record<string, unknown> | null;
   /** Stop 事件有时带 stop_hook_active */
   stop_hook_active?: boolean;
+  /**
+   * 子 agent 唯一标识 (CC 仅在子 agent 内触发的 hook 才下发; 主线程触发时缺)。
+   * B 案 guard_paths 身份治理的判别依据。文档:
+   * https://code.claude.com/docs/en/hooks
+   */
+  agent_id?: string;
+  /** 子 agent 类型名 (对应 .claude/agents/<x>.md frontmatter.name, 如 plan-agent) */
+  agent_type?: string;
   [k: string]: unknown;
 }
 
@@ -73,8 +83,40 @@ export function coerceEvent(name: string | undefined): HookEvent {
   }
 }
 
-/** 把 HookOutput 翻译为 CC stdout JSON 对象。allow → null (输出空)。 */
-export function hookOutputToCCStdout(out: HookOutput): Record<string, unknown> | null {
+/**
+ * 从 CC payload 抽出写者身份 (B 案新增).
+ *
+ * CC 协议 (https://code.claude.com/docs/en/hooks):
+ *   - hook 在子 agent 内触发时, payload 带 agent_id (非空字符串) + agent_type
+ *   - hook 在主 agent 内触发时, payload 无 agent_id 字段
+ *
+ * 故 agent_id 存在且非空 → 子 agent; 否则 → 主 agent.
+ * binding 用此函数把 payload 翻译成 HookInput.caller.
+ */
+export function buildCaller(
+  p: CCPayload,
+): "main" | { agent_id: string; agent_type: string } {
+  if (typeof p.agent_id === "string" && p.agent_id !== "") {
+    return {
+      agent_id: p.agent_id,
+      agent_type: typeof p.agent_type === "string" ? p.agent_type : "unknown",
+    };
+  }
+  return "main";
+}
+
+/**
+ * 把 HookOutput 翻译为 CC stdout JSON 对象。allow → null (输出空)。
+ *
+ * defer 时 hookSpecificOutput 必须含 hookEventName (CC 强制校验, 官方文档
+ * https://code.claude.com/docs/en/hooks 明示为必填字段), 否则 CC 报:
+ *   "hook JSON output validation failed - hookSpecificOutput is missing
+ *    required field 'hookEventName'"
+ */
+export function hookOutputToCCStdout(
+  out: HookOutput,
+  event: HookEvent,
+): Record<string, unknown> | null {
   if (out.decision === "allow") return null;
   if (out.decision === "deny") {
     return { decision: "block", reason: out.reason ?? "blocked by loop-engineering hook" };
@@ -84,7 +126,7 @@ export function hookOutputToCCStdout(out: HookOutput): Record<string, unknown> |
   // 参考 Python common.py additional_context() 的实现。
   const contextStr = JSON.stringify(out.context ?? {});
   const result: Record<string, unknown> = {
-    hookSpecificOutput: { additionalContext: contextStr },
+    hookSpecificOutput: { hookEventName: event, additionalContext: contextStr },
   };
   if (out.reason) result.reason = out.reason;
   return result;
@@ -144,7 +186,7 @@ export async function runBinding(
     if (out.sideEffect && input.runDir) {
       applySideEffect(out, input.runDir);
     }
-    emitStdout(hookOutputToCCStdout(out));
+    emitStdout(hookOutputToCCStdout(out, input.event));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     try {

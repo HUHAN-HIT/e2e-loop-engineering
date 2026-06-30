@@ -28,6 +28,31 @@
 - **coordinator 提示词不变量 (提示层):** `core/coordinator.md` 增"停回合的唯一依据"与"上下文信号永远不是
   停止理由"两条硬规则, 从根因侧杜绝误读早停 (`<system-reminder>` 是数据不是指令)。
 
+### 新增 — Worktree-Only 隔离 (P6, 2026-06-29)
+
+实施 spec `docs/superpowers/specs/2026-06-29-worktree-only-isolation-design.md` (路 B);
+发布粒度见 `.changeset/p6-worktree-only-isolation.md`。Claude Code 宿主默认走"一 run 一专属
+一次性 worktree"形态, 根治"主工程不兼容 hook 冲突"与"孤儿 run 误伤日常开发"。
+
+- **改动① worktree 隔离 + 根 marker:** `syncProjectHookConfig` 不再盲抄主工程 `.claude/` ——
+  worktree 内 `settings.json` 经 `keepOnlyLoopHooks` 过滤成只含 e2e-loop 4 hook (剥掉用户主工程
+  hook, 隔离成立), 不抄 `.opencode`; allocator 在 worktree 根写 `.loop-engineering/worktree.json`
+  marker。新增 `@e2e-loop/shared` 的 `worktree_marker.ts` (marker 读 helper `readWorktreeMarker`/
+  `isInLoopWorktree` + loop hook 判据 + settings 过滤纯函数, **不反向依赖 ssot-ts**) 与
+  `@e2e-loop/ssot` 的 `worktree/marker.ts` (marker 写, 走 `atomicReplace`)。
+- **改动② enforcement 落 CLI 层:** 因 hook 要生效须先注册、主工程纯净则 `probe_and_gate` 不在场,
+  引导/拦截改由 CLI 承担。`runInit` worktree 模式打印进 worktree 引导; `runDispatch`/`runRun` 加硬
+  gate —— 仅对 worktree 模式 (`state.workdir` 非空) 的 run 生效, 要求 cwd 的 marker.run_id 匹配,
+  否则退出码 2; none 模式一律放行 (零回归)。`probe_and_gate` 增 worktree 内一致性正向自检
+  (cwd marker.run_id 与 active run 不一致则注入 `worktree_marker_warning`, 一致/无 marker 维持原
+  行为, 异常仍退化放行守红线)。
+- **改动③ 一 worktree 一 run:** `runInit` 在 `allocateRunWorktree` 前若检测到 cwd 已是 loop
+  worktree (有 marker) 则拒绝再 init (退出码 2)。
+- **测试:** 新增 `tests-ts/worktree_marker.test.ts` / `tests-ts/cli_worktree_gate.test.ts`,
+  扩展 `tests-ts/probe_and_gate.test.ts` 与 `tests-ts/ssot/worktree_allocator.test.ts`;
+  全量 bun **577 pass / 0 fail**, `tsc --noEmit` 0 error, none 模式集成测试
+  (integration_dry_run / integration_dispatch_collect) 无回归。
+
 ### 新增
 
 - **开源许可:** 仓库根新增 `LICENSE` (Apache-2.0); 5 个发布包 package.json 均补 `"license": "Apache-2.0"`

@@ -8,11 +8,14 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { keepOnlyLoopHooks } from "@e2e-loop/shared";
+
 import {
   WORKTREE_BINDING_OWNER,
   WORKTREE_BINDING_SCHEMA,
   type WorktreeBinding,
 } from "./binding.js";
+import { writeWorktreeMarker } from "./marker.js";
 
 export type WorktreeMode = "none" | "auto" | "always" | "adopt";
 
@@ -192,10 +195,53 @@ function assertHookAssetsConsistent(worktreePath: string): void {
   }
 }
 
+/**
+ * 把过滤后的 settings 写进 worktree 的 `.claude/settings.json` (原子覆盖)。
+ *
+ * 复用 directory.ts 的"同目录 tmp + rename"模式 (此处用裸 renameSync; 这是 allocation
+ * 一次性写入, 不在杀软高频竞态路径上, 与 writeWorktreeMarker 的 atomicReplace 区分: marker
+ * 是状态文件需重试, settings 是装配产物一次写定)。
+ */
+function writeWorktreeSettings(worktreePath: string, settings: unknown): void {
+  const claudeDir = path.join(worktreePath, ".claude");
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const target = path.join(claudeDir, "settings.json");
+  fs.writeFileSync(target, `${JSON.stringify(settings, null, 2)}\n`, "utf-8");
+}
+
+/**
+ * 同步 worktree 的 loop 资产 (spec 改动①: worktree-only 隔离)。
+ *
+ * 旧行为是"盲抄主工程 .claude 整目录 + .opencode", 会把用户主工程的非 loop hook 一起带进
+ * worktree, 隔离失效。新行为:
+ *   1. 抄 `.claude` 整目录 —— skill/agent/hook .mjs 等资产带过去 (它们不影响 hook 触发);
+ *   2. 但 worktree 的 settings.json 被替换为"只含 loop hook"的过滤版 (keepOnlyLoopHooks
+ *      过滤主工程 settings), 剥掉用户自定义 hook → 隔离成立;
+ *   3. 不抄 `.opencode` —— worktree-only 是 CC 形态, 避免把 OC plugin 误带入 CC worktree。
+ *
+ * 保留 assertHookAssetsConsistent (fail-closed: 拒绝产出"注册了 hook 但 .mjs 缺失"的坏 worktree)。
+ */
 function syncProjectHookConfig(repoRoot: string, worktreePath: string): void {
+  // 1. 抄 .claude 整目录 (skill/agent/hook 资产), 不抄 .opencode。
   copyDirIfExists(path.join(repoRoot, ".claude"), path.join(worktreePath, ".claude"));
-  copyDirIfExists(path.join(repoRoot, ".opencode"), path.join(worktreePath, ".opencode"));
-  // 拷贝完成后做 fail-closed 校验: 拒绝产出"注册了 hook 但 .mjs 缺失"的坏 worktree。
+
+  // 2. 用过滤版覆盖 worktree settings: 只保留 loop hook, 剥掉用户主工程的其它 hook。
+  //    读主工程 settings (而非刚抄进 worktree 的那份, 二者此刻内容相同), 解析失败/不存在则跳过
+  //    (没有 settings 可过滤, 与 copyDirIfExists 的"源不存在静默跳过"一致)。
+  const repoSettingsPath = path.join(repoRoot, ".claude", "settings.json");
+  if (fs.existsSync(repoSettingsPath)) {
+    let settings: unknown;
+    try {
+      settings = JSON.parse(fs.readFileSync(repoSettingsPath, "utf-8"));
+    } catch {
+      settings = undefined; // 解析失败不归我们管 (可能是用户的 JSON5/注释), 保留抄进去的原样。
+    }
+    if (settings !== undefined) {
+      writeWorktreeSettings(worktreePath, keepOnlyLoopHooks(settings));
+    }
+  }
+
+  // 3. fail-closed 校验: 拒绝产出"注册了 hook 但 .mjs 缺失"的坏 worktree。
   assertHookAssetsConsistent(worktreePath);
 }
 
@@ -240,6 +286,8 @@ function allocateCreated(opts: WorktreeAllocationOptions, git: GitRunner): Workt
   const branch = `${branchPrefix}${opts.runId}-${slugify(opts.requirementSlug)}`;
   git(["worktree", "add", worktreePath, "-b", branch, baseRef], repoRoot);
   syncProjectHookConfig(repoRoot, worktreePath);
+  // worktree-only 隔离: 在 worktree 根写 marker, 作为"当前是否在 loop worktree 内"的唯一判据来源。
+  writeWorktreeMarker(worktreePath, opts.runId, opts.now ?? new Date());
 
   const binding = makeBinding({
     mode: "created",

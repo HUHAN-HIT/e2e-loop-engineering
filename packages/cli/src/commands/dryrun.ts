@@ -47,6 +47,7 @@ import {
 } from "@e2e-loop/ssot/worktree";
 import { Complexity, Phase, parseRunState } from "@e2e-loop/ssot/schema";
 import type { TaskPlan, PlanAmendmentNeeded } from "@e2e-loop/ssot/schema";
+import { isInLoopWorktree, readWorktreeMarker } from "@e2e-loop/shared";
 
 import type { Args } from "../args.js";
 
@@ -133,6 +134,48 @@ function parseWorktreeMode(raw: string | undefined): WorktreeMode | null {
   return null;
 }
 
+/**
+ * worktree 模式硬 gate (spec: 2026-06-29-worktree-only-isolation-design 改动②)。
+ *
+ * 只对 "worktree 模式" 的 run 生效 —— 判据严格区分 none vs worktree:
+ *   - 读 run-state, 取 state.workdir。读不到 state (缺失/解析失败) → 不 gate, 放行
+ *     (让下游命令体的 Coordinator 构造去报缺失; gate 不抢错)。
+ *   - state.workdir 为空/null (即 worktree-mode=none 的 run) → 不 gate, 放行
+ *     (现有 dry-run/dispatch 测试绝大多数是 none 模式, 必须保持放行)。
+ *   - state.workdir 非空 (worktree 模式) → 要求当前 cwd 就在该 run 的 worktree:
+ *     readWorktreeMarker(cwd) 非空且 marker.run_id === 该 run 的 run_id。
+ *     不满足 → 写 stderr + 返回 2 (拒绝); 满足 → 返回 null (放行)。
+ *
+ * 返回 number → 命令应以此退出码拒绝; 返回 null → 放行 (继续命令体)。
+ */
+function worktreeGate(runDir: string, runId: string, command: string): number | null {
+  let workdir: string | null | undefined;
+  try {
+    // 用 shared 的 readRunState (返回 null 不抛); 这里直接读 run-state.json 取 workdir。
+    const statePath = path.join(runDir, "run-state.json");
+    const raw = JSON.parse(fs.readFileSync(statePath, "utf-8")) as Record<string, unknown>;
+    const w = raw.workdir;
+    workdir = typeof w === "string" ? w : null;
+  } catch {
+    // 读不到 state → 不 gate (放行, 让命令体的 Coordinator 去报错)
+    return null;
+  }
+
+  // none 模式 (workdir 空/null) → 不 gate
+  if (!workdir) return null;
+
+  // worktree 模式 → 要求 cwd 在该 worktree (marker.run_id 匹配)
+  const marker = readWorktreeMarker(process.cwd());
+  if (marker !== null && marker.run_id === runId) {
+    return null; // cwd 就在该 run 的 worktree, 放行
+  }
+  process.stderr.write(
+    `错误: run ${runId} 是 worktree 模式, 请在其 worktree 内运行 ${command} ` +
+      `(cd ${workdir})\n`,
+  );
+  return 2;
+}
+
 // ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
@@ -168,6 +211,16 @@ export function runInit(args: Args): number {
       ? Complexity.simple
       : (rawComplexity as TaskPlan["complexity"]);
 
+  // 改动③ (一个 worktree 一个 run): 若 cwd 已身处一个 loop worktree → 拒绝再 init 新 run。
+  // 必须在 allocateRunWorktree 之前 (此前不触碰 git), 让 "一 worktree 一 run" 铁律机械成立。
+  if (isInLoopWorktree(process.cwd())) {
+    process.stderr.write(
+      "错误: 一个 worktree 只跑一个 run; 当前已身处一个 loop worktree。" +
+        "请回主工程根 bootstrap 新 run (e2e-loop init <req> --worktree-mode always)。\n",
+    );
+    return 2;
+  }
+
   const sequenceRunsRoot = resolveRunsRoot(args);
   const runId = nextRunId(sequenceRunsRoot);
   const allocation = allocateRunWorktree({
@@ -201,6 +254,17 @@ export function runInit(args: Args): number {
   process.stdout.write("phase: " + state.phase + ", complexity: " + state.complexity + "\n");
   if (state.workdir) {
     process.stdout.write("workdir: " + state.workdir + "\n");
+  }
+
+  // 改动② (bootstrap 引导): worktree 模式 (allocation.binding!=null) 时打印醒目引导,
+  // 提示用户 cd 进 worktree 后再开 Claude 会话 (hook 只在 worktree 内会话生效)。
+  if (allocation.binding !== null) {
+    process.stdout.write(
+      "\n下一步: 进入 worktree 后再开 Claude 会话 (loop hook 只在该 worktree 内会话生效):\n" +
+        `    cd ${allocation.workdir}\n` +
+        "然后在 worktree 内启动会话, 主 agent 加载 SKILL.md 即成为 coordinator。\n" +
+        "(在主工程根直接跑 dispatch/run 会被 CLI 拒绝并引导回 worktree。)\n",
+    );
   }
   return 0;
 }
@@ -330,6 +394,10 @@ export function runRun(args: Args): number {
   const runsRoot = resolveRunsRoot(args);
   const runDir = resolveRunDir(runsRoot, runId);
   const maxTicks = parseIntArg(args.values["max-ticks"], 100);
+
+  // 改动② (worktree 硬 gate): worktree 模式的 run 必须在其 worktree 内推进; none 模式放行。
+  const gate = worktreeGate(runDir, runId, "run");
+  if (gate !== null) return gate;
 
   const coord = new Coordinator(runDir, makeRunner());
   if (coord.state.phase !== Phase.IMPLEMENTING) {
@@ -536,6 +604,10 @@ export function runDispatch(args: Args): number {
   }
   const runsRoot = resolveRunsRoot(args);
   const runDir = resolveRunDir(runsRoot, runId);
+
+  // 改动② (worktree 硬 gate): worktree 模式的 run 必须在其 worktree 内推进; none 模式放行。
+  const gate = worktreeGate(runDir, runId, "dispatch");
+  if (gate !== null) return gate;
 
   const coord = new Coordinator(runDir, makeRunner());
   if (coord.state.phase !== Phase.IMPLEMENTING) {

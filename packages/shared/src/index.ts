@@ -7,6 +7,7 @@
  * - types: HostAdapter / HostHook / HookInput / HookOutput / SideEffect / HookFeatures 等
  * - path_match: glob + 前缀匹配 (guard_paths 用)
  * - runs: run 目录扫描与 run-state.json 读取
+ * - worktree_marker: worktree 根 marker 读 helper + loop hook 判据 + settings 过滤纯函数
  * - run_state: RunState / Phase / Complexity 等类型
  * - task_plan: task-plan.yaml 读取
  * - actual_writes: §3.4 三层采集 + 越界检测 (行为权威: Python scheduling/actual_writes.py)
@@ -18,6 +19,7 @@ export * from "./types.js";
 export * from "./path_match.js";
 export * from "./run_state.js";
 export * from "./runs.js";
+export * from "./worktree_marker.js";
 export * from "./task_plan.js";
 export * from "./actual_writes.js";
 export * from "./hooks/index.js";

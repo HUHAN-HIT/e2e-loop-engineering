@@ -20,7 +20,7 @@
  *     1. 无活跃 run       → defer; additionalContext 解析后含 capabilities.git_diff
  *     2. 活跃 run + unattended 无通道 → deny block; reason 含 "unattended"
  *   guard_paths (PreToolUse Write):
- *     3. IMPLEMENTING + allowed=["src/**"] + 写 src/a.ts → allow (stdout 空)
+ *     3. 子 agent(implementation-worker) IMPLEMENTING + allowed=["src/**"] + 写 src/a.ts → allow (stdout 空)
  *     4. 同上下文 + 写 .claude/settings.json → deny block (永远 deny 区)
  *     5. 同上下文 + 写 docs/x.md (OOB)              → deny block
  *   guard_anchors (Stop):
@@ -296,18 +296,22 @@ test("probe_and_gate: 活跃 run + unattended 无通道 → deny block + reason"
 // guard_paths (PreToolUse Write)
 // ===========================================================================
 
-test("guard_paths: IMPLEMENTING + allowed=[src/**] + 写 src/a.ts → allow (空 stdout)", () => {
+test("guard_paths: 子 agent(implementation-worker) IMPLEMENTING + allowed=[src/**] + 写 src/a.ts → allow (空 stdout)", () => {
   makeRun(
     "20260628-002",
     { phase: "IMPLEMENTING", active_tasks: ["T1"] },
     [{ id: "T1", allowed_write_paths: ["src/**"] }],
   );
 
+  // writer-identity (B 案): IMPLEMENTING 阶段写源码的合法主体是 implementation-worker 子 agent;
+  // 故 payload 带 agent_id/agent_type 模拟子 agent (主 agent 无 agent_id, 写源码会被正确 deny)。
   const r = runHook("guard_paths", {
     hook_event_name: "PreToolUse",
     tool_name: "Write",
     tool_input: { file_path: path.join(SANDBOX, "src", "a.ts") },
     cwd: SANDBOX,
+    agent_id: "sub-T1",
+    agent_type: "implementation-worker",
   });
   expect(r.status).toBe(0);
   expect(parseDecision(r.stdout).kind).toBe("allow");

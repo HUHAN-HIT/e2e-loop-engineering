@@ -17,7 +17,7 @@ test("workspace root is private and delegates publishing to workspace packages",
 });
 
 test("CLI package exposes the real built bin target", () => {
-  expect(cliPackageJson.name).toBe("@e2e-loop/cli");
+  expect(cliPackageJson.name).toBe("e2e-loop");
   expect(cliPackageJson.bin).toEqual({
     "e2e-loop": "dist/index.js",
   });

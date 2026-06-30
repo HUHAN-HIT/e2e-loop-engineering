@@ -1,7 +1,7 @@
 ---
 "@e2e-loop/ssot": minor
 "@e2e-loop/shared": minor
-"@e2e-loop/cli": minor
+"e2e-loop": minor
 ---
 
 P6 (Worktree-Only 隔离, spec 2026-06-29): Claude Code 宿主默认走"一 run 一专属一次性 worktree"形态。

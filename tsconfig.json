@@ -25,7 +25,7 @@
       "@e2e-loop/adapter-opencode": [
         "packages/adapter-oc/src/index.ts"
       ],
-      "@e2e-loop/cli": [
+      "e2e-loop": [
         "packages/cli/src/index.ts"
       ],
       "@e2e-loop/ssot": [

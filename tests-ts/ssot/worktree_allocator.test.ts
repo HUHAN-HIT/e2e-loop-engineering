@@ -479,3 +479,104 @@ test("[worktree cleanup] refuses unmanaged bindings", () => {
 
   expect(() => cleanupManagedWorktree(binding)).toThrow(/managed=false/);
 });
+
+// ---------------------------------------------------------------------------
+// 缺口 B 修复 (2026-06-30): existing/adopt 分支也写根 marker, 否则 worktreeGate 永久拒绝。
+// ---------------------------------------------------------------------------
+
+test("[worktree allocator][缺口B] adopt 在被采纳 worktree 根写 marker", () => {
+  const repo = makeTmp();
+  const adopted = path.join(makeTmp(), "adopted");
+  fs.mkdirSync(adopted, { recursive: true });
+  const common = path.join(repo, ".git");
+  const { runner } = makeGitRunner({
+    "rev-parse --show-toplevel": repo,
+    "rev-parse --git-common-dir": common,
+  });
+
+  const allocation = allocateRunWorktree({
+    mode: "adopt",
+    repoCwd: repo,
+    runId: "20260630-001",
+    worktreePath: adopted,
+    now: new Date("2026-06-30T00:00:00.000Z"),
+    git: (args, cwd) => {
+      if (cwd === adopted && args.join(" ") === "rev-parse --git-common-dir") {
+        return common;
+      }
+      return runner(args, cwd);
+    },
+  });
+
+  const markerPath = path.join(adopted, ".loop-engineering", "worktree.json");
+  expect(fs.existsSync(markerPath)).toBe(true);
+  const marker = JSON.parse(fs.readFileSync(markerPath, "utf-8"));
+  expect(marker.schema).toBe("loop-engineering.worktree-marker.v1");
+  expect(marker.owner).toBe("loop-engineering");
+  expect(marker.run_id).toBe("20260630-001");
+  expect(allocation.workdir).toBe(adopted);
+});
+
+test("[worktree allocator][缺口B] auto 命中已在 linked worktree → existing 分支在根写 marker", () => {
+  const repo = makeTmp();
+  // linked worktree 的标志: .git 是文件 (不是目录)。
+  fs.writeFileSync(
+    path.join(repo, ".git"),
+    "gitdir: /somewhere/.git/worktrees/wt\n",
+    "utf-8",
+  );
+  const { runner } = makeGitRunner({
+    "rev-parse --show-toplevel": repo,
+  });
+
+  const allocation = allocateRunWorktree({
+    mode: "auto",
+    repoCwd: repo,
+    runId: "20260630-002",
+    now: new Date("2026-06-30T00:00:00.000Z"),
+    git: runner,
+  });
+
+  expect(allocation.binding?.mode).toBe("existing");
+  expect(allocation.workdir).toBe(repo);
+  const markerPath = path.join(repo, ".loop-engineering", "worktree.json");
+  expect(fs.existsSync(markerPath)).toBe(true);
+  const marker = JSON.parse(fs.readFileSync(markerPath, "utf-8"));
+  expect(marker.run_id).toBe("20260630-002");
+});
+
+test("[worktree allocator][缺口B] adopt 目标根已绑别的 run → 拒绝", () => {
+  const repo = makeTmp();
+  const adopted = path.join(makeTmp(), "adopted");
+  fs.mkdirSync(path.join(adopted, ".loop-engineering"), { recursive: true });
+  fs.writeFileSync(
+    path.join(adopted, ".loop-engineering", "worktree.json"),
+    JSON.stringify({
+      schema: "loop-engineering.worktree-marker.v1",
+      owner: "loop-engineering",
+      run_id: "20260601-999",
+      created_at: "2026-06-01T00:00:00.000Z",
+    }),
+    "utf-8",
+  );
+  const common = path.join(repo, ".git");
+  const { runner } = makeGitRunner({
+    "rev-parse --show-toplevel": repo,
+    "rev-parse --git-common-dir": common,
+  });
+
+  expect(() =>
+    allocateRunWorktree({
+      mode: "adopt",
+      repoCwd: repo,
+      runId: "20260630-003",
+      worktreePath: adopted,
+      git: (args, cwd) => {
+        if (cwd === adopted && args.join(" ") === "rev-parse --git-common-dir") {
+          return common;
+        }
+        return runner(args, cwd);
+      },
+    }),
+  ).toThrow(/一个 worktree 只跑一个 run|已绑定 run/);
+});

@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { keepOnlyLoopHooks } from "@e2e-loop/shared";
+import { keepOnlyLoopHooks, readWorktreeMarker } from "@e2e-loop/shared";
 
 import {
   WORKTREE_BINDING_OWNER,
@@ -245,6 +245,25 @@ function syncProjectHookConfig(repoRoot: string, worktreePath: string): void {
   assertHookAssetsConsistent(worktreePath);
 }
 
+/**
+ * 在 worktree 根写 marker, 但先核对既有 marker: 若根已绑定一个属于本 owner 且 run_id 不同的
+ * marker → 拒绝 (机械兑现 "一个 worktree 一个 run", 对应 spec 2026-06-29-worktree-only-isolation
+ * 改动③ 中 existing/adopt 分支缺失的防撞)。无既有 marker 或同 run_id → 正常写。
+ *
+ * 缺口 B 修复 (2026-06-30): created 之外的 existing/adopt 分支此前设了 workdir 却不写 marker,
+ * 使 worktreeGate 因 readWorktreeMarker(cwd)=null 永久拒绝 dispatch/run。统一经本 helper 补写。
+ */
+function bindWorktreeMarker(worktreeRoot: string, runId: string, now: Date): void {
+  const existing = readWorktreeMarker(worktreeRoot);
+  if (existing !== null && existing.run_id !== runId) {
+    throw new Error(
+      `worktree 根 ${worktreeRoot} 已绑定 run ${existing.run_id}; ` +
+        `一个 worktree 只跑一个 run, 拒绝再绑定 ${runId}`,
+    );
+  }
+  writeWorktreeMarker(worktreeRoot, runId, now);
+}
+
 function makeBinding(fields: {
   mode: WorktreeBinding["mode"];
   repoRoot: string;
@@ -287,7 +306,7 @@ function allocateCreated(opts: WorktreeAllocationOptions, git: GitRunner): Workt
   git(["worktree", "add", worktreePath, "-b", branch, baseRef], repoRoot);
   syncProjectHookConfig(repoRoot, worktreePath);
   // worktree-only 隔离: 在 worktree 根写 marker, 作为"当前是否在 loop worktree 内"的唯一判据来源。
-  writeWorktreeMarker(worktreePath, opts.runId, opts.now ?? new Date());
+  bindWorktreeMarker(worktreePath, opts.runId, opts.now ?? new Date());
 
   const binding = makeBinding({
     mode: "created",
@@ -321,6 +340,8 @@ function allocateAdopted(opts: WorktreeAllocationOptions, git: GitRunner): Workt
     throw new Error("adopt worktree 与当前 repo 不属于同一个 git common dir");
   }
   syncProjectHookConfig(repoRoot, adopted);
+  // 缺口 B: adopt 也要写根 marker, 否则 worktreeGate 永久拒绝该 run 的 dispatch/run。
+  bindWorktreeMarker(adopted, opts.runId, opts.now ?? new Date());
   const baseRef = opts.baseRef ?? DEFAULT_BASE_REF;
   const binding = makeBinding({
     mode: "adopted",
@@ -359,6 +380,8 @@ export function allocateRunWorktree(opts: WorktreeAllocationOptions): WorktreeAl
   if (opts.mode === "auto" && isLinkedWorktree(repoCwd, git)) {
     const repoRoot = repoRootFor(repoCwd, git);
     const baseRef = opts.baseRef ?? DEFAULT_BASE_REF;
+    // 缺口 B: existing 分支也要写根 marker, 否则 worktreeGate 永久拒绝该 run 的 dispatch/run。
+    bindWorktreeMarker(repoRoot, opts.runId, opts.now ?? new Date());
     const binding = makeBinding({
       mode: "existing",
       repoRoot,

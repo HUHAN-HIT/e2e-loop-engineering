@@ -44,6 +44,20 @@
   caller=undefined 由来注释, 说明 OC plugin runtime 无 agent_id/agent_type 等价物, 身份治理
   仅在 CC 端生效 (这是已知跨宿主差异, 非缺陷).
 
+### 修复 — worktree existing/adopt 分支补写根 marker (缺口 B, 2026-06-30)
+
+`allocateRunWorktree` 此前只有 `created` 分支写 worktree 根 marker; `existing`(auto 命中已在
+linked worktree)与 `adopted`(adopt)两条分支虽设了 `workdir`(令 run 进入 worktree 模式、激活
+`worktreeGate`)却不写 marker, 导致 `worktreeGate` 因 `readWorktreeMarker(cwd)=null` 永久拒绝
+该 run 的 dispatch/run。
+
+- **统一经 `bindWorktreeMarker` 写 marker**(`packages/ssot-ts/src/worktree/allocator.ts`):新增
+  helper, 写前核对既有 marker——若根已绑定属于本 owner 且 run_id 不同的 marker 则 throw 拒绝
+  (机械兑现 spec 2026-06-29-worktree-only-isolation 改动③ 中 existing/adopt 分支缺失的"一个
+  worktree 一个 run"防撞)。`created`/`existing`/`adopt` 三条分支统一调用本 helper。
+- **测试**(`tests-ts/ssot/worktree_allocator.test.ts` 新增 3 例):adopt 写根 marker、auto-命中-
+  linked-worktree 的 existing 分支写根 marker、目标根已绑别的 run 时拒绝。
+
 ### 修复 — worktree 早停加固 (2026-06-29)
 
 针对"协调器把上下文压缩信号 (StrategicCompact) 误读成停止指令而早停"与"Stop hook 在 git worktree 里

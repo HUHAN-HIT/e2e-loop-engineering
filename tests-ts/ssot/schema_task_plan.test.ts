@@ -15,7 +15,9 @@ import {
   TaskSchema,
   TestCaseSchema,
   TaskPlanSchema,
+  TaskDetailSchema,
   parseTaskPlan,
+  parseTaskDetail,
 } from "@e2e-loop/ssot";
 
 test("[py: test_task_defaults] Task 默认值: depends_on=[] exclusive=false risk=normal status=pending attempt=0", () => {
@@ -31,6 +33,7 @@ test("[py: test_task_defaults] Task 默认值: depends_on=[] exclusive=false ris
   expect(t.tests).toEqual([]);
   expect(t.status).toBe(TaskStatus.pending);
   expect(t.attempt).toBe(0);
+  expect(t.detail_ref).toBeNull();
   // 多服务字段默认
   expect(t.service).toBeNull();
   expect(t.provides_contracts).toEqual([]);
@@ -79,6 +82,46 @@ test("[py: test_task_plan_yaml_roundtrip] 解析 → 结构往返一致 (含嵌�
   ]);
   expect(plan2.tasks[1].service).toBe("gateway");
   expect(plan2.tasks[1].consumes_contracts).toEqual(["C-auth-token"]);
+});
+
+test("[detail] TaskPlan 保留 detail_ref, TaskDetail 支持验收上下文/映射/review focus", () => {
+  const plan = parseTaskPlan({
+    complexity: "complex",
+    tasks: [
+      {
+        id: "T01",
+        title: "带细节的 task",
+        detail_ref: "planning/task-details/T01.yaml",
+        allowed_write_paths: ["src/auth/**"],
+        acceptance_refs: ["AC-001"],
+        tests: [{ id: "T01-CASE-001", scenario: "happy", checks: ["passed == true"] }],
+      },
+    ],
+  });
+  expect(plan.tasks[0]!.detail_ref).toBe("planning/task-details/T01.yaml");
+
+  const detail = parseTaskDetail({
+    task_id: "T01",
+    summary: "接入验证码",
+    business_logic_steps: ["先校验验证码", "通过后复用原登录流程"],
+    acceptance_context: [
+      {
+        ref: "AC-001",
+        intent: "验证码通过后进入密码校验",
+        observable_behavior: "原登录路径保持不变",
+        implementation_implications: ["验证码校验在密码校验前"],
+      },
+    ],
+    verification_map: [
+      { acceptance_ref: "AC-001", planned_cases: ["T01-CASE-001"], notes: "主路径" },
+    ],
+    review_focus: ["检查 session 签发未被改动"],
+  });
+  expect(detail.schema).toBe("loop-engineering.task-detail.v1");
+  expect(detail.acceptance_context[0]!.ref).toBe("AC-001");
+  expect(detail.verification_map[0]!.planned_cases).toEqual(["T01-CASE-001"]);
+  expect(detail.review_focus).toEqual(["检查 session 签发未被改动"]);
+  expect(() => TaskDetailSchema.parse({ business_logic_steps: [] })).toThrow();
 });
 
 test("[py: test_task_plan_alias_schema] 真实键是 `schema`, 默认 v2", () => {

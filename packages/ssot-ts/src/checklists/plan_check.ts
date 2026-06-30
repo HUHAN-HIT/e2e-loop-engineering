@@ -20,6 +20,7 @@ import { pathGlobsOverlap as pathGlobsOverlapRef } from "../scheduling/path_over
 import type { ClarificationQuestions } from "../schema/clarification.js";
 import type { ServiceContracts } from "../schema/service_contracts.js";
 import type { TaskPlan } from "../schema/task_plan.js";
+import type { TaskDetail } from "../schema/task_detail.js";
 
 /** 路径重叠判定注入签名 (= S3.pathGlobsOverlap)。 */
 export type PathOverlapFn = (a: readonly string[], b: readonly string[]) => boolean;
@@ -75,6 +76,7 @@ export function checkPlan(
     contracts?: ServiceContracts | null;
     pathOverlapFn?: PathOverlapFn;
     clarification?: ClarificationQuestions | null;
+    taskDetails?: Record<string, TaskDetail | null | undefined>;
   },
 ): PlanCheckResult {
   const contracts = options?.contracts ?? null;
@@ -90,6 +92,9 @@ export function checkPlan(
   items.push(...checkTaskHasRequiredFields(plan));
   items.push(...checkParallelPathsDisjoint(plan, pathOverlapFn));
   items.push(...checkDepsNoCycle(plan));
+  if (options?.taskDetails !== undefined) {
+    items.push(...checkTaskDetails(plan, options.taskDetails));
+  }
 
   // 澄清证据 (用户决策 2026-06-28): medium/complex 跳过澄清须留证。
   // 仅在调用方提供 clarification 入参时纳入 (兜底校验, 由 runtime submitPlan 注入);
@@ -347,6 +352,125 @@ function checkDepsNoCycle(plan: TaskPlan): PlanCheckItem[] {
   ];
 }
 
+
+// ---------------------------------------------------------------------------
+// task detail 检查 (可选; 调用方提供 taskDetails 时启用)
+// ---------------------------------------------------------------------------
+
+function normalizeDetailRef(ref: string): string {
+  return ref.replace(/\\/g, "/");
+}
+
+function isSafeDetailRef(ref: string): boolean {
+  const norm = normalizeDetailRef(ref);
+  if (norm.startsWith("/") || /^[A-Za-z]:\//.test(norm)) return false;
+  if (norm.includes("../") || norm === ".." || norm.startsWith("..")) return false;
+  return norm.startsWith("planning/task-details/") && norm.endsWith(".yaml");
+}
+
+function detailRequired(plan: TaskPlan, task: TaskPlan["tasks"][number]): boolean {
+  return plan.complexity === "complex" && (task.risk === "high" || task.exclusive);
+}
+
+function checkTaskDetails(
+  plan: TaskPlan,
+  taskDetails: Record<string, TaskDetail | null | undefined>,
+): PlanCheckItem[] {
+  const items: PlanCheckItem[] = [];
+
+  for (const task of plan.tasks) {
+    const ref = task.detail_ref ?? null;
+    const required = detailRequired(plan, task);
+
+    if (ref !== null && !isSafeDetailRef(ref)) {
+      items.push(
+        mkItem(
+          "task_detail_ref_path_safe",
+          false,
+          `task ${task.id} detail_ref 不安全: ${pyRepr(ref)}`,
+        ),
+      );
+      continue;
+    }
+    if (ref !== null) {
+      items.push(mkItem("task_detail_ref_path_safe", true, `task ${task.id}`));
+    }
+
+    if (ref === null) {
+      if (required) {
+        items.push(
+          mkItem("task_detail_exists", false, `task ${task.id} 必须声明 detail_ref`),
+        );
+      }
+      continue;
+    }
+
+    const norm = normalizeDetailRef(ref);
+    const detail = taskDetails[norm] ?? taskDetails[ref] ?? null;
+    if (detail === null) {
+      items.push(
+        mkItem("task_detail_exists", false, `task ${task.id} detail 文件缺失: ${ref}`),
+      );
+      continue;
+    }
+    items.push(mkItem("task_detail_exists", true, `task ${task.id}`));
+
+    if (detail.task_id !== task.id) {
+      items.push(
+        mkItem(
+          "task_detail_task_id_matches",
+          false,
+          `task ${task.id} detail.task_id=${pyRepr(detail.task_id)}`,
+        ),
+      );
+      continue;
+    }
+    items.push(mkItem("task_detail_task_id_matches", true, `task ${task.id}`));
+
+    if (required && detail.business_logic_steps.length === 0) {
+      items.push(
+        mkItem("task_detail_steps_present", false, `task ${task.id} 缺 business_logic_steps`),
+      );
+    } else {
+      items.push(mkItem("task_detail_steps_present", true, `task ${task.id}`));
+    }
+
+    const refs = new Set(task.acceptance_refs);
+    const badAcceptanceRefs = [
+      ...detail.acceptance_context.map((c) => c.ref),
+      ...detail.verification_map.map((v) => v.acceptance_ref),
+    ].filter((r) => !refs.has(r));
+    if (badAcceptanceRefs.length > 0) {
+      items.push(
+        mkItem(
+          "task_detail_acceptance_refs_match",
+          false,
+          `task ${task.id} detail 引用了未声明 AC: ${pyList([...new Set(badAcceptanceRefs)])}`,
+        ),
+      );
+    } else {
+      items.push(mkItem("task_detail_acceptance_refs_match", true, `task ${task.id}`));
+    }
+
+    const caseIds = new Set(task.tests.map((tc) => tc.id));
+    const badCases = detail.verification_map
+      .flatMap((v) => v.planned_cases)
+      .filter((caseId) => !caseIds.has(caseId));
+    if (badCases.length > 0) {
+      items.push(
+        mkItem(
+          "task_detail_planned_cases_match",
+          false,
+          `task ${task.id} detail 引用了未声明 case: ${pyList([...new Set(badCases)])}`,
+        ),
+      );
+    } else {
+      items.push(mkItem("task_detail_planned_cases_match", true, `task ${task.id}`));
+    }
+  }
+
+  return items;
+}
 // ---------------------------------------------------------------------------
 // §11.2 多服务契约自检 (仅在 contracts 提供时跑)
 // ---------------------------------------------------------------------------

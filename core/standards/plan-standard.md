@@ -88,7 +88,7 @@ AC 是整个 run 的真理来源——所有 task、所有测试都回指 AC。A
 
 ## 5. task-plan.yaml 主契约
 
-schema 以 `@e2e-loop/ssot/schema` (`task_plan.ts`) 为参考。每个 task 必含: `id`, `title`, `allowed_write_paths`, `depends_on`(可空), `acceptance_refs`, `exclusive`, `risk`, `tests`。
+schema 以 `@e2e-loop/ssot/schema` (`task_plan.ts`) 为参考。每个 task 必含: `id`, `title`, `allowed_write_paths`, `depends_on`(可空), `acceptance_refs`, `exclusive`, `risk`, `tests`。复杂高风险或 exclusive task 必含 `detail_ref`，指向 `planning/task-details/<task-id>.yaml`。
 
 ```yaml
 complexity: complex
@@ -125,6 +125,7 @@ tasks:
     acceptance_refs: [AC-003]
     exclusive: false
     risk: high          # 触及鉴权控制面
+    detail_ref: planning/task-details/T03.yaml
     tests:
       - id: T03-CASE-001
         scenario: 验证码正确时允许进入密码校验
@@ -136,7 +137,50 @@ tasks:
 
 ---
 
-## 6. 计划自检 (返回前必跑; 完整实现见 `@e2e-loop/ssot/checklists` 的 `checkPlan`)
+## 6. task-details 拆分文件 `[C]`
+
+当 task 的业务逻辑、状态流、迁移步骤或控制面影响超过几句话能讲清时，不把长篇实现细节塞进 `task-plan.yaml`。主计划只保留 DAG、写路径、AC、planned cases 与 `detail_ref`；长篇指导放到 `planning/task-details/<task-id>.yaml`。
+
+**必须写 detail 的情况:**
+1. `complexity: complex` 且 task `risk: high`。
+2. `complexity: complex` 且 task `exclusive: true`。
+3. task 的实现需要跨模块状态流、迁移顺序、兼容策略或回滚口径。
+
+**detail 文件不是第二套验收标准。** AC 与 planned cases 仍以 `task-plan.yaml` 为准；detail 只能解释它们、展开业务逻辑步骤、说明测试映射与 review 重点。
+
+推荐结构:
+
+```yaml
+task_id: T03
+summary: 登录流程接入验证码校验
+business_logic_steps:
+  - 从请求中读取 captcha_token 与 captcha_answer。
+  - 调用验证码校验结果决定是否进入密码校验。
+  - 校验失败时保持登录失败计数语义不变。
+acceptance_context:
+  - ref: AC-003
+    intent: 验证码正确时才允许进入后续密码校验。
+    observable_behavior: 正确验证码放行, 错误验证码拒绝。
+    implementation_implications:
+      - 验证码校验必须发生在密码校验前。
+      - 错误验证码不得改变密码失败计数。
+verification_map:
+  - acceptance_ref: AC-003
+    planned_cases: [T03-CASE-001]
+    notes: 正确验证码放行到密码校验分支。
+  - acceptance_ref: AC-003
+    planned_cases: [T03-CASE-002]
+    notes: 错误验证码不会弱化既有账号锁定规则。
+review_focus:
+  - 确认验证码失败不会增加或绕过密码失败计数。
+  - 确认错误返回码与既有登录接口兼容。
+```
+
+plan-check 会做客观校验: `detail_ref` 路径必须安全、文件能解析、`task_id` 匹配、`business_logic_steps` 非空、`acceptance_context` 只引用本 task 的 `acceptance_refs`、`verification_map` 只引用本 task 的 planned case。
+
+---
+
+## 7. 计划自检 (返回前必跑; 完整实现见 `@e2e-loop/ssot/checklists` 的 `checkPlan`)
 
 `[S][M][C]`:
 - [ ] 每个 AC 至少映射 1 个 task 和 1 个测试用例。
@@ -150,7 +194,7 @@ tasks:
 
 ---
 
-## 7. 红线
+## 8. 红线
 
 - 不把 task 拆得过大 (worker 扛不住) 或过碎 (徒增协调)——粒度判据见 `glossary.md` §5。
 - 不发明对抗式门禁。计划是契约, 不是弹药。

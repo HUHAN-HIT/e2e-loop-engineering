@@ -30,7 +30,8 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 ### 输入 (coordinator 给的 packet)
 ```
 { task_id,
-  context_paths:       [design.md 本 task 相关段 / task-plan 中本 task 段],     # coordinator 已切好的最小必读切片 —— 必读
+  context_paths:       [task detail / design.md 本 task 相关段 / task-plan 中本 task 段], # coordinator 已切好的最小必读切片 —— 必读
+  task_detail_path:    planning/task-details/<task-id>.yaml | null,          # 存在时是第一个必读上下文
   dependency_artifacts:[依赖 task 的 summary.md / 相关契约文件],                 # 依赖产物路径 —— 按需自读, 只读摘要别拉长上下文
   planned_test_cases:  [...],
   allowed_write_paths: [...],
@@ -38,7 +39,7 @@ tools: Read, Write, Edit, Bash, Glob, Grep
 ```
 
 ### 职责
-1. 读 packet 与 `context_paths` (必读切片); `dependency_artifacts` 按需自读 (只读你依赖的那条产物摘要)。除此之外不读, 尤其不通读仓库。
+1. 读 packet 与 `context_paths` (必读切片); 若 `task_detail_path` 存在, 先读它。`acceptance_context` / `verification_map` / `review_focus` 只解释和映射 task-plan 中已有 AC/cases, 不是第二套验收标准; `dependency_artifacts` 按需自读 (只读你依赖的那条产物摘要)。除此之外不读, 尤其不通读仓库。
 2. 先写测试去满足 planned 的 checks (可先看到它失败, 但这是你自己的开发节奏, 不需要向任何人证明时序)。
 3. 实现代码, 跑测试到绿。改动严格限制在 `allowed_write_paths` 内。
 4. 产出三个文件:

@@ -27,8 +27,10 @@ import type { TaskCheckItem } from "../checklists/task_check.js";
 import { parseRunState } from "../schema/run_state.js";
 import type { RunState } from "../schema/run_state.js";
 import { parseTaskPlan } from "../schema/task_plan.js";
+import { parseTaskDetail } from "../schema/task_detail.js";
 import type { TaskPlan } from "../schema/task_plan.js";
-import { dumpTaskPlanYaml, loadTaskPlanYaml } from "./yaml_io.js";
+import type { TaskDetail } from "../schema/task_detail.js";
+import { dumpTaskPlanYaml, loadTaskPlanYaml, loadTaskDetailYaml } from "./yaml_io.js";
 
 /** design §6 子目录清单 (tasks 下每个 task 还会有自己的 <id>/ 子目录)。 */
 export const RUN_SUBDIRS: readonly string[] = [
@@ -211,6 +213,15 @@ export function readTaskPlan(planPath: string): TaskPlan {
   }
   const data = loadTaskPlanYaml(fs.readFileSync(planPath, "utf-8"));
   return parseTaskPlan(data);
+}
+
+/** 从 planning/task-details/<id>.yaml 读 + parse。文件不存在 → throw。 */
+export function readTaskDetail(detailPath: string): TaskDetail {
+  if (!fs.existsSync(detailPath)) {
+    throw new Error(`task detail 不存在: ${detailPath}`);
+  }
+  const data = loadTaskDetailYaml(fs.readFileSync(detailPath, "utf-8"));
+  return parseTaskDetail(data);
 }
 
 /** 建 tasks/<id>/ 与 logs/ 子目录。已存在不报错 (幂等)。 */

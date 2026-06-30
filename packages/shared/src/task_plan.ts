@@ -34,6 +34,8 @@ export interface Task {
   tests?: TestCase[];
   status?: TaskStatus;
   attempt?: number;
+  /** 当前 task 的长篇指导文件路径, 相对 run root。 */
+  detail_ref?: string | null;
   /** 多服务 run 可选 (design §11.1) */
   service?: string | null;
   provides_contracts?: string[];

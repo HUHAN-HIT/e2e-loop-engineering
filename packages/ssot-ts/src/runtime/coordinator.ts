@@ -47,6 +47,7 @@ import { parseServiceContracts } from "../schema/service_contracts.js";
 import type { ServiceContracts } from "../schema/service_contracts.js";
 import { RiskLevel, TaskStatus } from "../schema/task_plan.js";
 import type { TaskPlan } from "../schema/task_plan.js";
+import type { TaskDetail } from "../schema/task_detail.js";
 import {
   clearHumanPending,
   isAwaitingHuman,
@@ -71,6 +72,7 @@ import {
   readDispatchMeta,
   readRunState,
   readTaskPlan,
+  readTaskDetail,
   writeActualWrites,
   writeCollectFailures,
   writeDispatchMeta,
@@ -272,6 +274,21 @@ export class Coordinator {
     }
   }
 
+
+  /** 读取当前 plan 声明的 task detail 文件; 解析失败记为 null, 交由 plan_check 产出诊断。 */
+  private readTaskDetails(plan: TaskPlan): Record<string, TaskDetail | null> {
+    const details: Record<string, TaskDetail | null> = {};
+    for (const task of plan.tasks) {
+      const ref = task.detail_ref ?? null;
+      if (ref === null) continue;
+      try {
+        details[ref.replace(/\\/g, "/")] = readTaskDetail(path.join(this.runDir, ref));
+      } catch {
+        details[ref.replace(/\\/g, "/")] = null;
+      }
+    }
+    return details;
+  }
   /** → PLANNING (从 CREATED 或 CLARIFYING 进)。 */
   startPlanning(): void {
     if (this.state.phase === Phase.CREATED || this.state.phase === Phase.CLARIFYING) {
@@ -293,10 +310,12 @@ export class Coordinator {
     // 跑计划自检. 多服务契约文件存在时纳入 gate; 澄清证据兜底 (medium/complex 跳过须留证)。
     const contracts = this.readServiceContracts();
     const clarification = this.readClarificationQuestions();
+    const taskDetails = this.readTaskDetails(plan);
     const result = checkPlan(plan, {
       contracts,
       pathOverlapFn: pathGlobsOverlap,
       clarification,
+      taskDetails,
     });
     if (!result.all_pass) {
       this.refreshPlanFile();

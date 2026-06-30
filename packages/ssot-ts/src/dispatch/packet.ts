@@ -25,10 +25,13 @@ export interface WorkerPacket {
   /** 当前 task 的 id。 */
   readonly task_id: string;
   /**
-   * coordinator 切好的最小必读切片 (design.md 全文 + task-plan.yaml 全文,
-   * worker 自己定位相关段 —— 简化版不做段级切片)。
+   * coordinator 切好的最小必读切片。若当前 task 有 detail_ref, detail 文件排第一。
    */
   readonly context_paths: string[];
+  /** 当前 task detail 文件路径; 无 detail_ref 时为 null。 */
+  readonly task_detail_path: string | null;
+  /** 当前 task 是否按复杂度/风险策略要求 detail。 */
+  readonly task_detail_required: boolean;
   /** 依赖 task 的 summary.md 路径列表, 按需自读。 */
   readonly dependency_artifacts: string[];
   /** task.tests (list[TestCase]), worker 写测试去满足这些 case。 */
@@ -48,16 +51,10 @@ export interface WorkerPacket {
  *
  * @param task 要派发的 task。
  * @param plan 整个 TaskPlan (用于反查依赖 task, 不直接传 plan 给 worker)。
- * @param runDir run 根目录 (用于定位 tasks/<dep_id>/summary.md)。
+ * @param runDir run 根目录 (用于定位 tasks/<dep_id>/summary.md 与 task detail)。
  * @param options.designMd planning/design.md 路径, 作为 contextPaths 之一。
  * @param options.taskPlanYaml planning/task-plan.yaml 路径, 作为 contextPaths 之一。
  * @param options.workdir 实际代码工作目录 (默认 dirname(runDir) —— 假设代码在 runDir 之外)。
- *
- * Notes:
- * - contextPaths 不做段级切片 (MVP 简化), worker 自行定位相关段。
- * - dependencyArtifacts 只放 task.depends_on 对应的 summary.md; 未 complete 的依赖不会出现
- *   (因为 readyFrontier 已挡)。
- * - 缺失的 summary.md 文件不报错 (仍写进列表, worker 读到不存在就跳过 —— 它是软信号)。
  */
 export function buildPacket(
   task: Task,
@@ -72,6 +69,14 @@ export function buildPacket(
   const designMd = options.designMd;
   const taskPlanYaml = options.taskPlanYaml;
   const workdir = options.workdir ?? path.dirname(runDir);
+  const taskDetailRequired =
+    plan.complexity === "complex" && (task.risk === "high" || task.exclusive);
+  const runDirClean = runDir.replace(/[\\/]+$/, "");
+  const taskDetailPath = task.detail_ref ? `${runDirClean}/${task.detail_ref}` : null;
+  const contextPaths =
+    taskDetailPath === null
+      ? [designMd, taskPlanYaml]
+      : [taskDetailPath, designMd, taskPlanYaml];
 
   // 只放依赖 task 的 summary.md (理论上 readyFrontier 已保证依赖 complete)。
   const byId = new Map<string, Task>();
@@ -86,7 +91,9 @@ export function buildPacket(
 
   return {
     task_id: task.id,
-    context_paths: [designMd, taskPlanYaml],
+    context_paths: contextPaths,
+    task_detail_path: taskDetailPath,
+    task_detail_required: taskDetailRequired,
     dependency_artifacts: depArtifacts,
     planned_test_cases: [...task.tests],
     allowed_write_paths: [...task.allowed_write_paths],

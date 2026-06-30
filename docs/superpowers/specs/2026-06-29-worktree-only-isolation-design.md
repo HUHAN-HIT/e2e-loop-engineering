@@ -140,10 +140,12 @@ e2e-loop-only `.claude/`,并在 worktree 根写一个 marker":
 
 - **bootstrap 引导 (CLI stdout):** `e2e-loop init --worktree-mode always` 创建完
   worktree 后,在终端打印醒目引导:已创建 `.worktrees/<id>`,请 `cd` 进去再开会话。
-- **后续命令硬 gate (CLI):** `dispatch` / `run` 等推进命令在"当前不在 loop worktree"
-  (cwd 无 worktree 根 marker,见改动①) 时**拒绝执行** (非 0 退出码 + 提示回 worktree)。
-  这是确定能执行的 CLI 层 enforcement,取代脆弱的 hook 层 warn/deny。
-  - *待确认:* 是否对 `status` 等只读命令豁免 (建议豁免:只读不推进状态,允许在任意位置查)。
+- **后续命令硬 gate (CLI):** `dispatch` / `run` 等推进命令**仅对 worktree 模式的 run**
+  (`run-state.workdir` 非空) 强制要求"当前 cwd 就在该 run 的 worktree"(cwd 的根 marker 存在
+  且 `marker.run_id` 匹配该 run),不满足则**拒绝执行** (非 0 退出码 + 提示 `cd` 回 worktree)。
+  **`worktree-mode=none` 的 run (workdir 空) 一律放行**——这类 run 无 worktree 约束,不 gate
+  (保证既有 dry-run/dispatch 流程零回归)。`status` 等只读命令不 gate (只读不推进状态,允许在
+  任意位置查)。这是确定能执行的 CLI 层 enforcement,取代脆弱的 hook 层 warn/deny。
 - **hook 仅 worktree 内正向自检 (`probe_and_gate`):** 降级为"在 worktree 内 (cwd 有根
   marker) 确认 marker.run_id 与当前 active run 一致"的正向校验,不一致则注入提示;
   **不承担"在主工程根拦人"职责** (它在那儿本就不存在)。异常仍退化放行,守红线。

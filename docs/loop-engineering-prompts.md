@@ -196,7 +196,7 @@ input/requirement.md + (若有) clarification/*.json。
 
 ## 接线说明 (how to wire up)
 
-1. **启动**: coordinator 不再询问是否使用隔离 git worktree, 直接调用 `e2e-loop init <req.md> --worktree-mode auto`(或省略参数, CLI 缺省为 auto), 建 runs/<run_id>/, 写 run-state.json(phase=CREATED, trust_mode=collaborative)。只有用户明确要求使用当前目录、强制新建或采用指定 worktree 时, 才改传 `--worktree-mode none` / `--worktree-mode always` / `--worktree-mode adopt`。
+1. **启动**: coordinator 不询问用户是否使用隔离 git worktree, 直接调用 `e2e-loop init <req.md> --worktree-mode auto`(或省略参数, CLI 缺省为 auto), 建 runs/<run_id>/, 写 run-state.json(phase=CREATED, trust_mode=collaborative)。**两会话边界:** 非 worktree 会话(主工程根)bootstrap 后**交还人**去 `.worktrees/<run_id>` 开新会话接续(本会话不继续推进: CLI gate 只放行 worktree 内的 dispatch/run); 已在 worktree 内的会话直接接续该 run, 不再 init。只有用户明确要求使用当前目录、强制新建或采用指定 worktree 时, 才改传 `--worktree-mode none` / `--worktree-mode always` / `--worktree-mode adopt`。
 2. **澄清**: medium/complex dispatch §B 评估 (simple 跳过); 不单独停人 —— 有阻塞问题带默认进 PLANNING、问题挂到计划拍板呈现, 裁量跳过则产非空 skip_basis 留证。
 3. **计划**: dispatch §C → 跑计划自检 → 把 design+task-plan 摘要呈给人 **plan_signoff**。人补充则回 §C; 通过则冻结计划进 IMPLEMENTING。
 4. **实施**: coordinator 每轮算 ready_frontier, 为每个 ready task dispatch 一个 §D(tools 白名单按其 allowed_write_paths 收窄)。回收 test-results/summary/key-diffs → 跑任务自检 → 过则解锁下游, 不过退回该 §D 一次。

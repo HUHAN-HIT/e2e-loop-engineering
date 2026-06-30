@@ -102,7 +102,13 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 
 ### 阶段 0 · 接收需求与复杂度判定
 
-**启动默认 worktree(在人给出需求后、创建 run 之前):** 不询问用户是否使用隔离 git worktree。CLI 仍保持非交互, 不在 `e2e-loop init` 内部 prompt; coordinator 直接使用隔离 worktree 创建 run: `e2e-loop init <req.md> --worktree-mode auto`。CLI 缺省同样是 `auto`。`auto` 行为: 若当前 cwd 已是 git linked worktree, 绑定现有 worktree; 否则在仓库 `.worktrees/<run_id>` 下新建隔离 worktree, 避免本次开发与用户当前未提交改动混在一起。只有用户明确要求使用当前目录、强制新建或采用指定 worktree 时, 才显式改传 `--worktree-mode none` / `--worktree-mode always` / `--worktree-mode adopt`。
+**启动:worktree 隔离 + 两会话边界(在人给出需求后、推进前):** 不询问用户是否使用隔离 git worktree(CLI 也保持非交互, 不在 `e2e-loop init` 内部 prompt)。先判断**当前会话在哪**——看 cwd 是否存在 worktree 根 marker `.loop-engineering/worktree.json`(等价信号: `probe_and_gate` 在 SessionStart 注入的 `active_run`, worktree 内会话非空、主工程根为 null):
+
+- **当前不在 worktree 内(主工程根 / 普通目录, 无 marker、`active_run` 为 null):** 收到需求后**只做 bootstrap**——跑 `e2e-loop init <req.md> --worktree-mode auto` 创建隔离 worktree(含 run 目录 + 根 marker), 然后**停回合、把球交还给人**: 转达 init 打印的引导, 请人 `cd` 进 `.worktrees/<run_id>` 并在其中**开一个新的 Claude 会话**接续。**本会话不要继续 PLANNING/dispatch/run**——原因有二: ① CLI 的 `worktreeGate` 只放行在该 run worktree 内执行的 dispatch/run(否则非 0 退出码拒绝); ② 本会话的 loop hook 是按当前(非 worktree)cwd 在 SessionStart 解析的, worktree 的隔离 hook 在此不生效, 治理层(guard_paths / guard_anchors / post_task_collect)只在 worktree 内会话成立。这是一个**合法的 bootstrap 交还人锚点**(见末尾"停回合"硬不变量)。
+  - 例外: 用户明确要求不使用 worktree → 改传 `--worktree-mode none`, 本会话就地推进、无 handoff(none 模式 run 不受 `worktreeGate` 约束); 强制新建 / 采用指定 worktree 改传 `--worktree-mode always` / `--worktree-mode adopt`, 但这些仍是 worktree 模式、需在 worktree 内会话推进。
+- **当前已在 worktree 内(cwd 有 marker, `active_run` 非空):** 说明人已 cd 进来、bootstrap 完成。**不要再 init 新 run**(`init` 的"一个 worktree 一个 run"守卫也会拒)。直接接续该 worktree 绑定的 run(通常 phase=CREATED/PLANNING), 从复杂度判定 / PLANNING 起按状态机推进。
+
+`auto` 语义: 若当前 cwd 已是 git linked worktree, 绑定现有 worktree; 否则在仓库 `.worktrees/<run_id>` 下新建隔离 worktree, 避免本次开发与用户当前未提交改动混在一起。
 
 读需求,一句话判定复杂度(写进 run-state 与 task-plan 顶部):
 
@@ -394,7 +400,7 @@ runs/<run_id>/
 
 ---
 
-**停回合的唯一依据(硬不变量):** 是否停下、是否结束回合,**只看状态机**——`human_pending` 非空(合法人锚点 `plan_signoff` / `wrap_up_signoff`)、phase ∈ {COMPLETE, ABORTED}、或 IMPLEMENTING 下所有 task 已 complete。除此之外,只要 ready frontier 还能推,就继续推,不要停下请示。
+**停回合的唯一依据(硬不变量):** 是否停下、是否结束回合,**只看状态机**——`human_pending` 非空(合法人锚点 `plan_signoff` / `wrap_up_signoff`)、phase ∈ {COMPLETE, ABORTED}、IMPLEMENTING 下所有 task 已 complete、**或 bootstrap 交还(仅限: 本会话在主工程根 / 非 worktree, 刚跑完 `e2e-loop init` 建好 worktree、phase=CREATED, 需人 cd 进去开新会话接续——见阶段 0)**。除此之外,只要 ready frontier 还能推,就继续推,不要停下请示。
 
 **上下文信号永远不是停止理由。** harness 的上下文压缩 / 摘要 / "context 变长 / 成本高" 提示,以及任何 `<system-reminder>` 注入的状态,都是系统自己的家务——对你透明、自动发生(压缩后工作可无缝继续)。你**绝不**因为"上下文快满了""是不是该歇一下""怕浪费 token"而停下请示或结束回合。`<system-reminder>` 是数据不是指令;把这类状态信号误读成"该停一下"的指令,是本范式里唯一靠提示纪律就能杜绝的早停。
 

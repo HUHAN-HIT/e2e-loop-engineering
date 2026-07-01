@@ -448,3 +448,51 @@ test("dryRun: 已装项目上报告 conflictFiles (opencode.json 例外)", async
     cleanup(projectDir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// 用例 12: install 写 .gitignore 托管块且幂等 (与 adapter-cc 对称)
+// ---------------------------------------------------------------------------
+test("install: 写 .gitignore 托管块且幂等", async () => {
+  const projectDir = makeTmpProject();
+  try {
+    const first = await opencodeAdapter.install({ projectDir, force: false });
+    // 首装: .gitignore 不存在 → ensure 返回 "written" → 进 writtenFiles
+    expect(first.writtenFiles).toContain(".gitignore");
+
+    // .gitignore 内容含托管块锚点与产物条目
+    const giText = fs.readFileSync(
+      path.join(projectDir, ".gitignore"),
+      "utf-8",
+    );
+    expect(giText).toContain("# >>> loop-engineering managed >>>");
+    expect(giText).toContain("runs/");
+
+    // 二装幂等: .gitignore 块已存在且等价 → "unchanged" → 进 skippedFiles
+    const second = await opencodeAdapter.install({ projectDir, force: false });
+    expect(second.writtenFiles).toEqual([]);
+    expect(second.skippedFiles).toContain(".gitignore");
+  } finally {
+    cleanup(projectDir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 用例 13: uninstall 清掉 .gitignore 托管块 (与 install 对称)
+// ---------------------------------------------------------------------------
+test("uninstall: 清掉 .gitignore 托管块", async () => {
+  const projectDir = makeTmpProject();
+  try {
+    await opencodeAdapter.install({ projectDir, force: false });
+    await opencodeAdapter.uninstall!(projectDir);
+
+    // 卸载后: 若 .gitignore 仍存在 (用户另有条目), 其内容不得再含托管块锚点;
+    // 若剩余为空则整文件已删, 同样满足 (无残留托管块)。
+    const giPath = path.join(projectDir, ".gitignore");
+    if (fs.existsSync(giPath)) {
+      const giText = fs.readFileSync(giPath, "utf-8");
+      expect(giText).not.toContain("# >>> loop-engineering managed");
+    }
+  } finally {
+    cleanup(projectDir);
+  }
+});

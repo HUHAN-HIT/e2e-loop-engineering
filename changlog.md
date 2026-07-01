@@ -21,7 +21,9 @@
   2. **保持目标仓库干净 (adapter-cc)**: `install` 在目标项目 `.gitignore` 写一个 `# >>> loop-engineering
      managed >>>` 托管块 ignore 掉这些产物 (`ensureHarnessGitignore`, 幂等); `uninstall` 对称清除该块
      (`removeHarnessGitignore`, 只删本工具托管块, 保留用户其它 ignore 条目)。install 落盘对称语义: 首装
-     `.gitignore` 不存在 → 进 `writtenFiles`; 二次幂等装 → 进 `skippedFiles`。
+     `.gitignore` 不存在 → 进 `writtenFiles`; 二次幂等装 → 进 `skippedFiles`。（adapter-oc 亦对称接入同一
+     shared 能力, 双宿主一致——OC install/uninstall 复用 `ensureHarnessGitignore` / `removeHarnessGitignore`
+     托管同一 `.gitignore` 块, 落盘/幂等/卸载语义与 CC 完全对齐。）
 - **明确不动 `guard_paths` hook**: 它在 PreToolUse 拦主 agent 直接写源码是正确设计 (主 agent 只编排,
   不落具体实现代码), 本次只治理 actual_writes 采集侧的误判, 与 guard_paths 的写路径白名单正交。
 - **传播**: 已装目标项目需 `e2e-loop install --host cc --project-dir <target> --force` 重装, 方在其

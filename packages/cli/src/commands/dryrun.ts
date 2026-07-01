@@ -20,6 +20,7 @@
  * 用于本地骨架验证 (与 Python `_echo_worker_callback` 等价)。
  */
 
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -27,7 +28,7 @@ import {
   Coordinator,
   buildNavigationMap,
   initRunDir,
-  nextRunId,
+  nextRunIdFromRoots,
   readRunState,
   readTaskPlan,
   writeRunState,
@@ -41,6 +42,7 @@ import {
 import type { WorkerOutcome, WorkerPacket } from "@e2e-loop/ssot/dispatch";
 import {
   allocateRunWorktree,
+  resolveWorktreeRoot,
   worktreeBindingPath,
   writeWorktreeBinding,
   type WorktreeMode,
@@ -134,6 +136,90 @@ function parseWorktreeMode(raw: string | undefined): WorktreeMode | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// resume: worktree bootstrap 后自动弹终端续跑 (供 init 兜底脚本 + resume 命令共用)
+// ---------------------------------------------------------------------------
+
+/**
+ * 弹出的新会话首条消息: 触发 loop-engineering skill。
+ * SKILL 检测 active_run 非空 + 已在 worktree 内 → 走"续跑"分支 (coordinator.md §5 阶段 0)。
+ */
+const RESUME_PROMPT = "/loop-engineering";
+
+/** 弹终端命令的注入点 (测试注入 fake 记录调用, 不真弹窗)。 */
+export type TerminalSpawner = (cmd: string, args: readonly string[]) => void;
+
+/** 默认 spawner: detached + unref, 让新终端窗口独立于父进程存活。 */
+function defaultTerminalSpawner(cmd: string, args: readonly string[]): void {
+  const child = spawn(cmd, [...args], { detached: true, stdio: "ignore" });
+  child.unref();
+}
+
+/** POSIX 单引号包裹 (内部单引号转义), 供 darwin/linux 弹终端命令拼路径。 */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * 按平台构造"弹新终端 + cd 到 worktree + 起 claude 续跑会话"的命令。
+ * 返回 null = 该平台无已知弹终端手段 → 调用方降级为手动引导。
+ *
+ * 纯函数 (只依赖 platform + workdir), 便于单测各平台分支; 真正 spawn 由 TerminalSpawner 注入。
+ */
+export function buildResumeSpawn(
+  platform: NodeJS.Platform,
+  workdir: string,
+): { cmd: string; args: string[] } | null {
+  if (platform === "win32") {
+    // start "" (空标题占位, 防带引号路径被当窗口标题) → 新 cmd 窗口; /k 保持窗口; cd /d 跨盘符。
+    return {
+      cmd: "cmd.exe",
+      args: ["/c", "start", "", "cmd", "/k", `cd /d "${workdir}" && claude "${RESUME_PROMPT}"`],
+    };
+  }
+  if (platform === "darwin") {
+    const inner = `cd ${shellQuote(workdir)} && claude ${RESUME_PROMPT}`;
+    return {
+      cmd: "osascript",
+      args: ["-e", `tell application "Terminal" to do script "${inner}"`],
+    };
+  }
+  if (platform === "linux") {
+    // best-effort: x-terminal-emulator 不存在时由 spawner 抛错 → 调用方降级。
+    return {
+      cmd: "x-terminal-emulator",
+      args: ["-e", `sh -c "cd ${shellQuote(workdir)} && claude ${RESUME_PROMPT}"`],
+    };
+  }
+  return null;
+}
+
+/**
+ * 在 worktree 根写一键续跑脚本 (resume.cmd / resume.sh), 作为自动弹终端失败时的手动兜底入口。
+ * 双击/运行即 cd 到脚本所在目录 (worktree 根) 并起 claude 续跑会话。
+ */
+function writeResumeScripts(workdir: string, runId: string): void {
+  const cmd =
+    "@echo off\r\n" +
+    `REM Loop Engineering: 进入本 worktree 续跑 run ${runId} (宿主命令非 claude 请改末行)\r\n` +
+    'cd /d "%~dp0"\r\n' +
+    `claude "${RESUME_PROMPT}"\r\n`;
+  fs.writeFileSync(path.join(workdir, "resume.cmd"), cmd, "utf-8");
+
+  const sh =
+    "#!/usr/bin/env sh\n" +
+    `# Loop Engineering: 进入本 worktree 续跑 run ${runId} (宿主命令非 claude 请改末行)\n` +
+    'cd "$(dirname "$0")" || exit 1\n' +
+    `claude "${RESUME_PROMPT}"\n`;
+  const shPath = path.join(workdir, "resume.sh");
+  fs.writeFileSync(shPath, sh, "utf-8");
+  try {
+    fs.chmodSync(shPath, 0o755);
+  } catch {
+    /* Windows / 权限受限: 忽略 (脚本仍可 sh resume.sh 运行) */
+  }
+}
+
 /**
  * worktree 模式硬 gate (spec: 2026-06-29-worktree-only-isolation-design 改动②)。
  *
@@ -222,7 +308,14 @@ export function runInit(args: Args): number {
   }
 
   const sequenceRunsRoot = resolveRunsRoot(args);
-  const runId = nextRunId(sequenceRunsRoot);
+  // worktree 模式下 run 目录写进 <worktree>/runs, 主仓 ./runs 永远空; 只扫它取序号会永远撞 ...-001
+  // (即便上一个 run 成功也撞, 因 .worktrees/<run_id> 仍在)。故把 worktree 根一并纳入序号源:
+  // 其下 created worktree 目录名即 run_id, 序号才能随已有 run 前进。none 模式仍只扫主仓 ./runs。
+  const seqRoots =
+    worktreeMode === "none"
+      ? [sequenceRunsRoot]
+      : [sequenceRunsRoot, resolveWorktreeRoot(process.cwd(), args.values["worktree-root"])];
+  const runId = nextRunIdFromRoots(seqRoots);
   const allocation = allocateRunWorktree({
     mode: worktreeMode,
     repoCwd: process.cwd(),
@@ -256,14 +349,19 @@ export function runInit(args: Args): number {
     process.stdout.write("workdir: " + state.workdir + "\n");
   }
 
-  // 改动② (bootstrap 引导): worktree 模式 (allocation.binding!=null) 时打印醒目引导,
-  // 提示用户 cd 进 worktree 后再开 Claude 会话 (hook 只在 worktree 内会话生效)。
+  // 改动② (bootstrap 引导): worktree 模式 (allocation.binding!=null) 时, 在 worktree 根写
+  // 一键续跑脚本 (自动弹终端失败时的手动兜底), 并打印引导:
+  // coordinator 会自动跑 `e2e-loop resume <run_id>` 弹终端在 worktree 内续跑到 plan 签署,
+  // 人零操作; 未弹出 (无已知终端 / spawn 失败) 时双击脚本手动进入。
   if (allocation.binding !== null) {
+    writeResumeScripts(allocation.workdir, runId);
     process.stdout.write(
-      "\n下一步: 进入 worktree 后再开 Claude 会话 (loop hook 只在该 worktree 内会话生效):\n" +
-        `    cd ${allocation.workdir}\n` +
-        "然后在 worktree 内启动会话, 主 agent 加载 SKILL.md 即成为 coordinator。\n" +
-        "(在主工程根直接跑 dispatch/run 会被 CLI 拒绝并引导回 worktree。)\n",
+      "\n下一步 (loop hook 只在该 worktree 内会话生效):\n" +
+        `    coordinator 将自动跑  e2e-loop resume ${runId}  弹终端在 worktree 内续跑到 plan 签署。\n` +
+        "    若未自动弹出, 双击 worktree 根的 resume.cmd (Windows) 或运行 sh resume.sh (macOS/Linux):\n" +
+        `        cd ${allocation.workdir}\n` +
+        "    并行开多个 run 时, 在主工程根跑  e2e-loop runs  可总览各支线停在哪 (含 plan 签署)。\n" +
+        "    (在主工程根直接跑 dispatch/run 会被 CLI 拒绝并引导回 worktree。)\n",
     );
   }
   return 0;
@@ -669,5 +767,158 @@ export function runCollectOutcome(args: Args): number {
 
   const result: CollectCliResult = coord.collectTaskOutcome(taskId);
   process.stdout.write(`${JSON.stringify(result)}\n`);
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// resume (自动弹终端续跑)
+// ---------------------------------------------------------------------------
+
+/**
+ * resume 子命令: worktree 模式 run 的自动续跑入口。
+ *
+ * 读 run-state 拿 workdir, 弹一个新终端在该 worktree 里起 claude 会话续跑 (首条消息
+ * /loop-engineering → skill 检测 active_run 走"已在 worktree 内→续跑"分支, 推进到 plan 签署)。
+ *
+ * 用法: e2e-loop resume <run_id> [--runs-root <dir>]
+ *
+ * fail-safe: 无已知弹终端手段 / spawn 抛错 → 打印手动引导 (worktree 根 resume 脚本), 退出 0,
+ * 绝不锁死。none 模式 run (无 workdir) → 提示就地续跑, 退出 0。
+ *
+ * spawner 参数注入 (测试注入 fake 记录调用, 不真弹窗)。
+ */
+export function runResume(
+  args: Args,
+  spawner: TerminalSpawner = defaultTerminalSpawner,
+): number {
+  const runId = positional(args, 0);
+  if (!runId) {
+    process.stderr.write("错误: resume 需要位置参数 <run_id>\n");
+    return 2;
+  }
+  const runsRoot = resolveRunsRoot(args);
+  const runDir = resolveRunDir(runsRoot, runId);
+  let state;
+  try {
+    state = readRunState(runDir);
+  } catch {
+    process.stderr.write(`错误: run-state.json 不存在: ${runDir}\n`);
+    return 2;
+  }
+  const workdir = state.workdir;
+  if (!workdir) {
+    process.stdout.write(
+      `run ${runId} 是 none 模式 (无隔离 worktree), 无需弹终端; 本会话就地续跑即可。\n`,
+    );
+    return 0;
+  }
+
+  const fallback = (): number => {
+    process.stdout.write(
+      "\n未能自动弹出终端, 请手动进入 worktree 续跑:\n" +
+        `    双击 ${path.join(workdir, "resume.cmd")} (Windows)\n` +
+        `    或运行 sh ${path.join(workdir, "resume.sh")} (macOS/Linux)\n` +
+        `    或手动 cd ${workdir} 后启动 claude 会话\n`,
+    );
+    return 0;
+  };
+
+  const spec = buildResumeSpawn(process.platform, workdir);
+  if (spec === null) return fallback();
+  try {
+    spawner(spec.cmd, spec.args);
+  } catch {
+    return fallback();
+  }
+  process.stdout.write(
+    `已为 run ${runId} 弹出新终端在 worktree 续跑 (${workdir}); 该窗口会自动推进到 plan 签署。\n`,
+  );
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// runs (并行 run 总览)
+// ---------------------------------------------------------------------------
+
+interface RunOverviewRow {
+  run_id: string;
+  phase: string;
+  complexity: string;
+  human_pending: string | null;
+  workdir: string | null;
+}
+
+/** 扫一个 runs 根下所有 <run_id>/run-state.json, 收集概览行 (非 run 目录 / 坏 state 跳过)。 */
+function collectRunsUnder(runsRoot: string, rows: RunOverviewRow[]): void {
+  let entries;
+  try {
+    entries = fs.readdirSync(runsRoot, { withFileTypes: true });
+  } catch {
+    return; // runs 根不存在 → 无 run
+  }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    let state;
+    try {
+      state = readRunState(path.join(runsRoot, e.name));
+    } catch {
+      continue;
+    }
+    rows.push({
+      run_id: state.run_id,
+      phase: state.phase,
+      complexity: state.complexity,
+      human_pending: state.human_pending ?? null,
+      workdir: state.workdir ?? null,
+    });
+  }
+}
+
+/**
+ * runs 子命令: 并行 run 总览。扫主根 runs/ (none 模式) 与 .worktrees 下各 worktree 的 runs/
+ * (worktree 模式), 打印每个 run 的 phase / human_pending / complexity / workdir。并行开发多 run
+ * 时, 一眼看全哪条支线停在 plan 签署 (human_pending)。
+ *
+ * 用法: e2e-loop runs [--runs-root <dir>] [--worktree-root <dir>] [--json]
+ */
+export function runRuns(args: Args): number {
+  const rows: RunOverviewRow[] = [];
+  // 1. 主根 none 模式 run
+  collectRunsUnder(resolveRunsRoot(args), rows);
+  // 2. worktree 模式 run: .worktrees/<id>/runs/<id>/run-state.json
+  try {
+    const wtRoot = resolveWorktreeRoot(process.cwd(), args.values["worktree-root"]);
+    let wtEntries: fs.Dirent[] = [];
+    try {
+      wtEntries = fs.readdirSync(wtRoot, { withFileTypes: true });
+    } catch {
+      wtEntries = [];
+    }
+    for (const e of wtEntries) {
+      if (!e.isDirectory()) continue;
+      collectRunsUnder(path.join(wtRoot, e.name, "runs"), rows);
+    }
+  } catch {
+    // resolveWorktreeRoot 在非 git 目录抛错 → 只列主根 run (worktree 内跑本命令时的降级)。
+  }
+
+  rows.sort((a, b) => a.run_id.localeCompare(b.run_id));
+
+  if (args.flags.has("json")) {
+    process.stdout.write(`${JSON.stringify({ runs: rows }, null, 2)}\n`);
+    return 0;
+  }
+  if (rows.length === 0) {
+    process.stdout.write("没有 run (主根 runs/ 与 .worktrees/*/runs/ 均为空)。\n");
+    return 0;
+  }
+  process.stdout.write(`共 ${rows.length} 个 run:\n`);
+  for (const r of rows) {
+    const wd = r.workdir ?? "(none 模式, 主根)";
+    process.stdout.write(
+      `  ${r.run_id}  phase=${r.phase}  human_pending=${humanPendingText(r.human_pending)}` +
+        `  complexity=${r.complexity}  workdir=${wd}\n`,
+    );
+  }
   return 0;
 }

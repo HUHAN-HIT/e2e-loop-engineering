@@ -235,24 +235,37 @@ export function initTaskDir(runDir: string, taskId: string): string {
  * 生成下一个 run_id: YYYYMMDD-NNN (UTC 当日)。
  *
  * 按当日已有 run 的最大序号 +1。不预留 (调用方拿到 id 后应尽快 initRunDir 占位)。
+ * 单源版本, 保持原行为; 多源见 nextRunIdFromRoots。
  */
 export function nextRunId(runsRoot: string): string {
+  return nextRunIdFromRoots([runsRoot]);
+}
+
+/**
+ * 生成下一个 run_id: YYYYMMDD-NNN, 序号取"所有给定源目录中当日已有 run 的最大序号 +1"。
+ *
+ * 为什么要多源: worktree 模式下 run 目录写进 <worktree>/runs, 主仓 ./runs 永远空。若只扫主仓
+ * ./runs, 计数器永不前进, 每次都返回 ...-001 → 撞已存在的 worktree/分支 (即便上一个 run 成功也撞,
+ * 因为 .worktrees/<run_id> 仍在)。故 worktree 模式应把 worktree 根 (其下每个 created worktree
+ * 目录名即 run_id) 一并纳入序号源。none 模式 / 单源调用 (nextRunId) 行为不变, dryrun 测试不受影响。
+ */
+export function nextRunIdFromRoots(roots: readonly string[]): string {
   const now = new Date();
   const y = now.getUTCFullYear();
   const mo = String(now.getUTCMonth() + 1).padStart(2, "0");
   const d = String(now.getUTCDate()).padStart(2, "0");
   const prefix = `${y}${mo}${d}-`;
-  let n = 1;
-  if (fs.existsSync(runsRoot)) {
-    const seqs: number[] = [];
-    for (const ent of fs.readdirSync(runsRoot, { withFileTypes: true })) {
+  const seqs: number[] = [];
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    for (const ent of fs.readdirSync(root, { withFileTypes: true })) {
       if (!ent.isDirectory() || !ent.name.startsWith(prefix)) continue;
       const tail = ent.name.slice(prefix.length);
       // 等价 Python `int(tail)` (非纯数字 ValueError → 跳过)。
       if (/^\d+$/.test(tail)) seqs.push(Number.parseInt(tail, 10));
     }
-    if (seqs.length > 0) n = Math.max(...seqs) + 1;
   }
+  const n = seqs.length > 0 ? Math.max(...seqs) + 1 : 1;
   return `${prefix}${String(n).padStart(3, "0")}`;
 }
 

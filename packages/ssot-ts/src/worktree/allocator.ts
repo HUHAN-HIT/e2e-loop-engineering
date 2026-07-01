@@ -54,6 +54,19 @@ function defaultGit(args: readonly string[], cwd: string): string {
   }).trim();
 }
 
+/**
+ * bootstrap 面包屑: 关键步骤前写一行 stderr。
+ *
+ * 动机: 原生层的 fast-fail 崩溃 (如 cpSync 在非 ASCII 路径, nodejs/node#54476) 会零输出、
+ * 绕过 try/catch 与 --report-on-fatalerror。逐步留面包屑后, 即使进程被 fast-fail 直接干掉,
+ * 用户也能从"最后一行 [bootstrap]"看出崩在哪一步。默认开 (bootstrap 一次性、行数极少);
+ * 设环境变量 E2E_LOOP_NO_TRACE 可静音。
+ */
+export function bootstrapTrace(step: string): void {
+  if (process.env.E2E_LOOP_NO_TRACE) return;
+  process.stderr.write(`[bootstrap] ${step}\n`);
+}
+
 function normalizeAbs(p: string): string {
   return path.resolve(p);
 }
@@ -126,7 +139,39 @@ function assertWorktreeRootIgnored(repoRoot: string, worktreeRoot: string): void
 
 function copyDirIfExists(src: string, dst: string): void {
   if (!fs.existsSync(src)) return;
-  fs.cpSync(src, dst, { recursive: true, force: true });
+  copyDirRecursive(src, dst);
+}
+
+/**
+ * 手写递归目录拷贝 (覆盖式, 等价 cpSync {recursive:true, force:true})。
+ *
+ * 为什么不用 fs.cpSync: Node v25 的 cpSync 在非 ASCII (如中文) 路径下"两条码路都坏":
+ *   - 原生 C++ 快路径 → STATUS_STACK_BUFFER_OVERRUN 进程级崩溃 (nodejs/node#54476);
+ *   - 传 filter 改走 JS 实现后, overwrite 时的 unlink 又报 errno=0 ("操作成功却抛错")。
+ * 而单个 fs 原语 (readdirSync/copyFileSync/mkdirSync/symlinkSync) 在非 ASCII 路径下均正常。
+ * 故用原语组合替代整个 cpSync: 对 Node 版本 / 路径字符集 / dst 是否已存在都稳定。
+ *
+ * 关键: 普通文件走 copyFileSync —— 它以 O_TRUNC 打开目标原地覆盖, 不经 unlink, 天然躲开
+ * 上面那个 unlink bug (即"已提交 .claude 被 worktree 检出后再覆盖"的场景)。
+ * 语义对齐 cpSync 默认: 递归、覆盖已存在文件、符号链接按链接本身拷 (dereference:false)。
+ */
+function copyDirRecursive(src: string, dst: string): void {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dst, entry.name);
+    if (entry.isDirectory()) {
+      copyDirRecursive(s, d);
+    } else if (entry.isSymbolicLink()) {
+      // 符号链接: 拷链接本身而非目标 (对齐 cpSync 默认)。symlinkSync 不覆盖, 已存在先删。
+      // (.claude 资产里通常没有符号链接, 此分支是防御性的。)
+      fs.rmSync(d, { force: true });
+      fs.symlinkSync(fs.readlinkSync(s), d);
+    } else {
+      // 普通文件: copyFileSync 原地覆盖 (等价 force:true), 不走 unlink。
+      fs.copyFileSync(s, d);
+    }
+  }
 }
 
 /**
@@ -223,6 +268,7 @@ function writeWorktreeSettings(worktreePath: string, settings: unknown): void {
  */
 function syncProjectHookConfig(repoRoot: string, worktreePath: string): void {
   // 1. 抄 .claude 整目录 (skill/agent/hook 资产), 不抄 .opencode。
+  bootstrapTrace("同步 .claude 资产到 worktree (递归拷贝)");
   copyDirIfExists(path.join(repoRoot, ".claude"), path.join(worktreePath, ".claude"));
 
   // 2. 用过滤版覆盖 worktree settings: 只保留 loop hook, 剥掉用户主工程的其它 hook。
@@ -254,6 +300,7 @@ function syncProjectHookConfig(repoRoot: string, worktreePath: string): void {
  * 使 worktreeGate 因 readWorktreeMarker(cwd)=null 永久拒绝 dispatch/run。统一经本 helper 补写。
  */
 function bindWorktreeMarker(worktreeRoot: string, runId: string, now: Date): void {
+  bootstrapTrace("写 worktree marker");
   const existing = readWorktreeMarker(worktreeRoot);
   if (existing !== null && existing.run_id !== runId) {
     throw new Error(
@@ -303,10 +350,34 @@ function allocateCreated(opts: WorktreeAllocationOptions, git: GitRunner): Workt
   }
 
   const branch = `${branchPrefix}${opts.runId}-${slugify(opts.requirementSlug)}`;
+  bootstrapTrace(`git worktree add ${worktreePath} (branch ${branch})`);
   git(["worktree", "add", worktreePath, "-b", branch, baseRef], repoRoot);
-  syncProjectHookConfig(repoRoot, worktreePath);
-  // worktree-only 隔离: 在 worktree 根写 marker, 作为"当前是否在 loop worktree 内"的唯一判据来源。
-  bindWorktreeMarker(worktreePath, opts.runId, opts.now ?? new Date());
+  // git worktree add 之后任何一步失败 (hook 装配/marker 绑定 throw), 都要回滚刚建出来的
+  // worktree + 分支; 否则会留下"已注册但残缺 (无 marker/runs)"的孤儿 worktree, 使下次
+  // init 撞 "worktree path 已存在", 逼用户手动 git worktree remove 才能重试。
+  try {
+    syncProjectHookConfig(repoRoot, worktreePath);
+    // worktree-only 隔离: 在 worktree 根写 marker, 作为"当前是否在 loop worktree 内"的唯一判据来源。
+    bindWorktreeMarker(worktreePath, opts.runId, opts.now ?? new Date());
+  } catch (err) {
+    // 回滚尽力而为: 单步失败不掩盖原始错误, 最终 rethrow err。
+    try {
+      git(["worktree", "remove", "--force", worktreePath], repoRoot);
+    } catch {
+      /* ignore */
+    }
+    try {
+      git(["branch", "-D", branch], repoRoot);
+    } catch {
+      /* ignore */
+    }
+    try {
+      git(["worktree", "prune"], repoRoot);
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
 
   const binding = makeBinding({
     mode: "created",
@@ -400,6 +471,24 @@ export function allocateRunWorktree(opts: WorktreeAllocationOptions): WorktreeAl
   }
 
   return allocateCreated({ ...opts, repoCwd }, git);
+}
+
+/**
+ * 解析 worktree 根目录绝对路径 (与 allocateCreated 内部一致: 相对 git 仓库根解析)。
+ *
+ * 供 CLI 在 worktree 模式下把 worktree 根纳入 run_id 序号源 (见 nextRunIdFromRoots):
+ * worktree 模式的 run 目录写进 <worktree>/runs, 主仓 ./runs 永远空, 只扫它会永远撞 ...-001;
+ * 改扫 worktree 根 (其下 created worktree 目录名即 run_id) 才能让序号前进。单独导出以复用
+ * 同一套 repoRoot/worktreeRoot 解析, 避免 CLI 侧重复实现导致与 allocator 分叉。
+ */
+export function resolveWorktreeRoot(
+  repoCwd: string,
+  worktreeRoot?: string,
+  git: GitRunner = defaultGit,
+): string {
+  const repoRoot = repoRootFor(path.resolve(repoCwd), git);
+  const raw = worktreeRoot ?? DEFAULT_WORKTREE_ROOT;
+  return resolveMaybeRelative(raw, repoRoot);
 }
 
 export function cleanupManagedWorktree(

@@ -35,6 +35,8 @@ import {
   runAmend,
   runDispatch,
   runCollectOutcome,
+  runResume,
+  runRuns,
 } from "./commands/dryrun.js";
 import { InvalidHostError } from "./util.js";
 
@@ -125,6 +127,11 @@ async function main(): Promise<number> {
       return dryRunGuard(() => runDispatch(args));
     case "collect-outcome":
       return dryRunGuard(() => runCollectOutcome(args));
+    // --- worktree bootstrap 续跑 / 并行总览 ---
+    case "resume":
+      return dryRunGuard(() => runResume(args));
+    case "runs":
+      return dryRunGuard(() => runRuns(args));
     case undefined:
       process.stderr.write("错误: 缺少子命令\n\n");
       printHelp(process.stderr);

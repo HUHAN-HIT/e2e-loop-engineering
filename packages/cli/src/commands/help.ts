@@ -33,6 +33,10 @@ export function printHelp(stream: NodeJS.WriteStream = process.stdout): void {
   dispatch         IMPLEMENTING 阶段选 ready task, 标 running, 输出 packets JSON
   collect-outcome  收回单个 task 的 outcome, 校验, 推进状态 / 留 running 给 fix
 
+worktree bootstrap 续跑 / 并行总览:
+  resume <run_id>  弹新终端在该 run 的 worktree 内起会话续跑到 plan 签署 (无法弹出则打印手动引导)
+  runs             总览主根 + 所有 worktree 的 run (phase / human_pending / workdir); 支持 --json
+
 通用选项:
   --help, -h            显示本帮助
   --runs-root <dir>     dry-run 命令的 runs 根目录 (缺省: ./runs)
@@ -82,6 +86,12 @@ dry-run 命令选项:
                   → stdout: JSON {task_id, verified, reason, failures, advanced_to,
                                    all_complete, attempt, max_retries_exceeded, ...}
   (以上命令均接受 --runs-root <dir>)
+
+worktree 续跑 / 总览选项:
+  resume      <run_id> [--runs-root <dir>]
+              → worktree 模式 run 弹新终端续跑; none 模式提示就地续跑; 弹不出则打印手动引导
+  runs        [--runs-root <dir>] [--worktree-root <dir>] [--json]
+              → 表格列出所有 run 的 phase / human_pending / complexity / workdir
 
 示例:
   e2e-loop install --host cc --project-dir ./my-project

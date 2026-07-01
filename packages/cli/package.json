@@ -8,6 +8,9 @@
     "directory": "packages/cli"
   },
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "e2e-loop": "dist/index.js"
   },

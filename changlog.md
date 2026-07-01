@@ -7,6 +7,30 @@
 
 首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
 
+### 新增 — worktree bootstrap 自动弹终端续跑 + e2e-loop runs 并行总览 (2026-07-01)
+
+观察: 目标项目里 `e2e-loop init --worktree-mode auto` 建完隔离 worktree 后, 协调器按阶段 0 停回合,
+让人**手动** `cd .worktrees/<run_id>` 再开新 Claude 会话续跑。根因: worktree 隔离要换 cwd + 换 `.claude`,
+而 CC 治理 hook 在 SessionStart 冻结、会话内无法重载 —— 换会话是 agent 的能力盲区。但"换会话"是**能力性**
+人工(该自动化掉), 与 `plan 签署` 这种**设计性**人锚点(SKILL §2 协作红线, 故意要人)不同, 不应让人在此被拦。
+
+- **新增 `e2e-loop resume <run_id>`** (`packages/cli/src/commands/dryrun.ts` / `index.ts` / `help.ts`):
+  读 run-state 拿 workdir, 按平台弹一个新终端在该 worktree 内起 `claude "/loop-engineering"` 会话续跑到
+  plan 签署(win32 `start cmd /k`; darwin `osascript`; linux `x-terminal-emulator` best-effort)。纯函数
+  `buildResumeSpawn(platform, workdir)` 便于单测, spawner 依赖注入(测试注入 fake, 不真弹窗); 无已知终端 /
+  spawn 抛错 → 打印手动引导、退出 0(fail-safe 不锁死); none 模式 run(无 workdir)→ 提示就地续跑。
+- **协调器 §0 handoff 改为自动续跑** (`core/coordinator.md` §5 阶段 0): bootstrap 后 coordinator 自动跑
+  `e2e-loop resume <run_id>` 弹终端续跑再停回合, **人零操作**, 只在弹出窗口里等 plan 签署拍板; 保留 plan
+  签署人锚点, 不碰协作红线, 不动 `worktreeGate`/`guard_paths`/`findActiveRun` 治理架构。
+- **init 生成兜底脚本** (`runInit`): worktree 模式在 worktree 根写 `resume.cmd`/`resume.sh`(内容 cd + 起
+  `claude "/loop-engineering"`), 自动弹窗失败时双击手动进入; 引导文案同步改为"coordinator 自动弹终端续跑"。
+- **新增 `e2e-loop runs` 并行总览**: 扫主根 `runs/` + `.worktrees/*/runs/`, 表格列各 run 的 phase /
+  human_pending / complexity / workdir(支持 `--json`), 并行开多 run 时一眼看全哪条支线停在 plan 签署。
+- **测试**: `tests-ts/cli_resume.test.ts`(buildResumeSpawn 各平台 + none 模式 + spawn 降级 + 注入 spawner)、
+  `tests-ts/cli_runs_overview.test.ts`(真 git 夹具, 主根 + worktree run 总览 / `--json` / 空), resume 脚本生成断言。
+- **传播**: 已装目标项目需 `e2e-loop install --host cc --project-dir <target> --force` 重装 SKILL.md 方生效
+  (源仓库 `core/coordinator.md` 是 SSOT)。
+
 ### 修复 — 目标项目阶段 0 CLI 定位修错配, 接线 doctor (2026-07-01)
 
 观察到协调会话在**目标项目**(被 install 过资产、无 `packages/` 的普通仓库, 如 jeepay3)里跑阶段 0 时,

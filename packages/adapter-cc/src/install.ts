@@ -25,6 +25,7 @@ import type {
   InstallResult,
   UninstallResult,
 } from "@e2e-loop/shared";
+import { ensureHarnessGitignore, removeHarnessGitignore } from "@e2e-loop/shared";
 import settingsTemplate from "./templates/settings.json" with { type: "json" };
 import { toDashHookName } from "./hook_dispatcher.js";
 
@@ -461,6 +462,13 @@ async function install(ctx: InstallContext): Promise<InstallResult> {
     (r === "written" ? writtenFiles : skippedFiles).push(e.rel);
   }
 
+  // 目标项目 .gitignore 托管块: 把 harness bootstrap 产物 (.claude/ / .loop-engineering/ /
+  // .worktrees/ / runs/ / resume.*) ignore 掉, 保持目标仓库 git status 干净 (根治 actual_writes
+  // 误判越界的下游诱因)。对称语义 (硬约束): 首装文件不存在 → ensure 返回 "written" → 进
+  // writtenFiles; 二次幂等装 → 返回 "unchanged" → 进 skippedFiles。
+  const gi = ensureHarnessGitignore(projectDir);
+  (gi === "unchanged" ? skippedFiles : writtenFiles).push(".gitignore");
+
   const manifest: AssetManifest = {
     files: entries.map((e) => {
       let size = 0;
@@ -598,6 +606,11 @@ async function uninstall(projectDir: string): Promise<UninstallResult> {
       }
     }
   }
+
+  // 5. 目标项目 .gitignore 托管块: 与 install 的 ensureHarnessGitignore 对称清除
+  // (只删本工具托管块, 保留用户其它 ignore 条目; 剩余为空则整文件删)。
+  const giRemoved = removeHarnessGitignore(root);
+  (giRemoved === "removed" ? removedFiles : notFoundFiles).push(".gitignore");
 
   return { removedFiles, notFoundFiles };
 }

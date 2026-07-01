@@ -13,6 +13,8 @@
  * - yaml_diag: YAML 解析诊断 (describeYamlError / parseYamlSafe) —— 把 js-yaml 异常
  *          转成带文件/行号/冒号提示的可执行诊断 (ssot / hook / doctor 三方复用)
  * - actual_writes: §3.4 三层采集 + 越界检测 (行为权威: Python scheduling/actual_writes.py)
+ * - harness_paths: harness 自身 bootstrap 产物路径集 + isHarnessInternal 判定 +
+ *          .gitignore 托管块读写 (actual_writes 过滤 + adapter-cc install 复用)
  * - hooks: 4 个 hook 的宿主无关 logic 层 (probe_and_gate / guard_paths /
  *          post_task_collect / guard_anchors) + 公共底座
  */
@@ -25,4 +27,5 @@ export * from "./worktree_marker.js";
 export * from "./task_plan.js";
 export * from "./yaml_diag.js";
 export * from "./actual_writes.js";
+export * from "./harness_paths.js";
 export * from "./hooks/index.js";

@@ -325,6 +325,37 @@ test("[行为] 越界检测复用 matchPath: src/* 单层 allowed 不覆盖 src/
   expect(r.outOfBounds).toContain("src/deep/x.py");
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// harness bootstrap 产物过滤 (治根: 不被 git status untracked 采进后误判越界)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test("[行为] computeActualWrites 过滤 harness 产物, 只留真实源码 (.claude/runs/resume.* 不计入)", async () => {
+  const repo = initGitRepo();
+  // base commit: 把真实源码先纳入版本控制 (git status 对 untracked 目录会折叠成 "src/" 单条,
+  // 故先 commit src/real.ts, 后续对它的修改才会以文件级路径出现在 diff/status 里)。
+  fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "src", "real.ts"), "export const x = 0;");
+  execFileSync("git", ["-C", repo, "add", "."]);
+  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"]);
+
+  // 制造改动: 3 类 harness 产物 (untracked) + 修改 1 个真实源码 (tracked)
+  fs.mkdirSync(path.join(repo, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(repo, ".claude", "settings.json"), "{}");
+  fs.mkdirSync(path.join(repo, "runs", "r", "tasks", "t"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "runs", "r", "tasks", "t", "summary.md"), "done");
+  fs.writeFileSync(path.join(repo, "resume.cmd"), "cd .");
+  fs.writeFileSync(path.join(repo, "src", "real.ts"), "export const x = 1;");
+
+  const run = mkTmp("aw-harness-filter-");
+  const r = await computeActualWrites(run, "T1", "HEAD", repo);
+  expect(r.source).toBe("git");
+  // 只含真实源码, 不含任何 harness 产物
+  expect(r.paths).toEqual(["src/real.ts"]);
+  expect(r.paths.some((p) => p.startsWith(".claude/"))).toBe(false);
+  expect(r.paths.some((p) => p.startsWith("runs/"))).toBe(false);
+  expect(r.paths).not.toContain("resume.cmd");
+});
+
 test("[清理] 删除全部临时目录夹具", () => {
   cleanup();
   expect(_tmpDirs.length).toBe(0);

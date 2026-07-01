@@ -499,3 +499,50 @@ test("dryRun: 已装项目上报告 conflictFiles (settings.json 例外)", async
     cleanup(projectDir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// 用例 10: install 落 .gitignore 托管块且幂等
+//          (根治 actual_writes 误判越界的下游诱因: 让目标仓库 git status 干净)
+// ---------------------------------------------------------------------------
+test("install: 写 .gitignore 托管块且幂等", async () => {
+  const projectDir = makeTmpProject();
+  try {
+    const first = await claudeCodeAdapter.install({ projectDir, force: false });
+    // 首装: .gitignore 进 writtenFiles
+    expect(first.writtenFiles).toContain(".gitignore");
+
+    // 文件含 harness ignore entries
+    const gi = fs.readFileSync(path.join(projectDir, ".gitignore"), "utf-8");
+    expect(gi).toContain("runs/");
+    expect(gi).toContain(".claude/");
+    expect(gi).toContain("# >>> loop-engineering managed >>>");
+
+    // 二装幂等: writtenFiles 为空, skippedFiles 含 .gitignore
+    const second = await claudeCodeAdapter.install({ projectDir, force: false });
+    expect(second.writtenFiles).toEqual([]);
+    expect(second.skippedFiles).toContain(".gitignore");
+  } finally {
+    cleanup(projectDir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 用例 11: uninstall 清掉 .gitignore 托管块 (与 install 对称)
+// ---------------------------------------------------------------------------
+test("uninstall: 清掉 .gitignore 托管块", async () => {
+  const projectDir = makeTmpProject();
+  try {
+    await claudeCodeAdapter.install({ projectDir, force: false });
+    await claudeCodeAdapter.uninstall!(projectDir);
+
+    // 托管块被移除: 文件不存在或不含托管块起始标记
+    const target = path.join(projectDir, ".gitignore");
+    if (fs.existsSync(target)) {
+      const gi = fs.readFileSync(target, "utf-8");
+      expect(gi).not.toContain("# >>> loop-engineering managed");
+    }
+    // 否则文件已被整个删除 (只含托管块时的行为), 亦满足"块被移除"
+  } finally {
+    cleanup(projectDir);
+  }
+});

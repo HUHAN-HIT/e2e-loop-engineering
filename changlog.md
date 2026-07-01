@@ -7,6 +7,26 @@
 
 首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
 
+### 修复 — actual_writes 误判 harness bootstrap 产物为 worker 越界 + install 落 .gitignore 托管块 (2026-07-01)
+
+- **根因**: harness 在目标项目里落的 bootstrap 产物 (`.claude/` / `.opencode/` / `.loop-engineering/` /
+  `.worktrees/` / `runs/` / `resume.cmd` / `resume.sh`) 会被 `git status --porcelain` 当 untracked 列出,
+  进而被 `packages/shared/src/actual_writes.ts` 的 `tryGitDiff` 采集进 `actual_writes.paths`, 被
+  `checkBoundary` 误判为 implementation-worker「越界写入源码」。
+- **两处修法**:
+  1. **治根 (shared)**: 新增 `packages/shared/src/harness_paths.ts`, 给出 canonical 产物路径集 +
+     `isHarnessInternal(rel)` 判定 (反斜杠归一化 + 去尾斜杠, 处理 git porcelain 的 `.claude/` 尾斜杠形态);
+     `computeActualWrites` 对三层 (git / fs / self_report) 返回的 paths 一律先经此过滤, 无论目标仓库
+     gitignore 是否干净都不再误判。
+  2. **保持目标仓库干净 (adapter-cc)**: `install` 在目标项目 `.gitignore` 写一个 `# >>> loop-engineering
+     managed >>>` 托管块 ignore 掉这些产物 (`ensureHarnessGitignore`, 幂等); `uninstall` 对称清除该块
+     (`removeHarnessGitignore`, 只删本工具托管块, 保留用户其它 ignore 条目)。install 落盘对称语义: 首装
+     `.gitignore` 不存在 → 进 `writtenFiles`; 二次幂等装 → 进 `skippedFiles`。
+- **明确不动 `guard_paths` hook**: 它在 PreToolUse 拦主 agent 直接写源码是正确设计 (主 agent 只编排,
+  不落具体实现代码), 本次只治理 actual_writes 采集侧的误判, 与 guard_paths 的写路径白名单正交。
+- **传播**: 已装目标项目需 `e2e-loop install --host cc --project-dir <target> --force` 重装, 方在其
+  `.gitignore` 落上托管块。
+
 ### 变更 — worktree bootstrap 支持 EnterWorktree 同会话续跑, 消除被迫重开 (2026-07-01)
 
 问题: §0 规定主根会话 bootstrap 建 worktree 后停回合、让用户**重开**一个 worktree 会话续跑。逐层

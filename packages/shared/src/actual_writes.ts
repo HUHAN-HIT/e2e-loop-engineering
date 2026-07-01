@@ -20,6 +20,7 @@ import * as cp from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { matchPath } from "./path_match.js";
+import { isHarnessInternal } from "./harness_paths.js";
 
 /** 采集来源 (§3.4) */
 export type ActualWritesSource = "git" | "fs" | "self_report";
@@ -211,6 +212,11 @@ export function readSelfReport(runDir: string, taskId: string): string[] {
  * `sinceMarker` 缺省时跳过 git, 直接走 fs / self_report。
  * 返回 Promise (签名要求), 内部用同步 API (git/fs), 实测耗时 < 100ms;
  * 不在 hot path 上阻塞 event loop 太久。
+ *
+ * harness 自身产物 (见 harness_paths.ts 的 isHarnessInternal) 不计入 worker 写入, 避免
+ * bootstrap 产物 (`.claude/` / `.loop-engineering/` / `.worktrees/` / `runs/` / `resume.*`)
+ * 被 git status 当 untracked 采进来后被 checkBoundary 误判越界。三层 (git/fs/self_report)
+ * 返回的 paths 一律先经此过滤。
  */
 export async function computeActualWrites(
   runDir: string,
@@ -223,20 +229,28 @@ export async function computeActualWrites(
     const root = repoRoot ?? path.resolve(runDir, "..", "..");
     const writes = tryGitDiff(root, sinceMarker);
     if (writes !== null) {
-      return { source: "git", paths: writes, isAuthoritative: true };
+      return {
+        source: "git",
+        paths: writes.filter((p) => !isHarnessInternal(p)),
+        isAuthoritative: true,
+      };
     }
   }
 
   // L2 fs snapshot
   const fsWrites = tryFsSnapshot(runDir, taskId);
   if (fsWrites !== null) {
-    return { source: "fs", paths: fsWrites, isAuthoritative: true };
+    return {
+      source: "fs",
+      paths: fsWrites.filter((p) => !isHarnessInternal(p)),
+      isAuthoritative: true,
+    };
   }
 
   // L3 self report (兜底, 非 authoritative)
   return {
     source: "self_report",
-    paths: readSelfReport(runDir, taskId),
+    paths: readSelfReport(runDir, taskId).filter((p) => !isHarnessInternal(p)),
     isAuthoritative: false,
   };
 }

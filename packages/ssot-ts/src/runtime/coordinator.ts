@@ -54,6 +54,7 @@ import {
   setHumanPending,
 } from "../state_machine/human_anchors.js";
 import { advancePhase, isTerminal } from "../state_machine/transitions.js";
+import { shouldAutoAcceptPlan } from "../state_machine/plan_auto_accept.js";
 import { buildPacket } from "../dispatch/packet.js";
 import type { WorkerPacket } from "../dispatch/packet.js";
 import {
@@ -328,10 +329,52 @@ export class Coordinator {
       // 不 set human_pending (让 agent 重交); 不 advance。
       return;
     }
-    // 通过 → 写 plan + set human_pending=plan_signoff。
+    // 通过 → 写 plan。simple 且未触发风险闸/未强制门禁 → 免签自动进 IMPLEMENTING; 否则设 plan_signoff。
     this.refreshPlanFile();
-    this.state = setHumanPending(this.state, HumanPending.plan_signoff);
+    const hasContracts = fs.existsSync(
+      path.join(this.runDir, "planning", "service-contracts.yaml"),
+    );
+    const autoAccept = shouldAutoAcceptPlan({
+      complexity: this.state.complexity,
+      tasks: plan.tasks,
+      requirePlanSignoff: this.state.config.require_plan_signoff,
+      hasServiceContracts: hasContracts,
+    });
+    if (autoAccept) {
+      // 诚实记账: 免签 ≠ 已签, 写独立审计标记后直接 advance (不设 human_pending)。
+      this.writePlanAutoAccepted(plan, hasContracts);
+      this.state = advancePhase(this.state, Phase.IMPLEMENTING);
+    } else {
+      this.state = setHumanPending(this.state, HumanPending.plan_signoff);
+    }
     this.refreshStateFile();
+  }
+
+  /**
+   * 免签时写诚实审计标记 planning/plan-auto-accepted.json。
+   *
+   * 与 signoff-feedback.md (人工反馈) 分属不同文件/语义, 绝不复用; 措辞禁用"签署/signed"。
+   * 后续任何人翻此 run, 一眼看出"计划从未经人工冻结意图, 是规则自动放行的"。
+   */
+  private writePlanAutoAccepted(plan: TaskPlan, hasContracts: boolean): void {
+    const hasHigh = plan.tasks.some((t) => t.risk === RiskLevel.high);
+    const hasExclusive = plan.tasks.some((t) => t.exclusive);
+    const marker = {
+      auto_accepted: true,
+      accepted_at: nowUtc().toISOString(),
+      reason:
+        "complexity=simple 且未触发风险闸(无 risk:high / 无 exclusive / 无 service-contracts)",
+      criteria_snapshot: {
+        complexity: this.state.complexity,
+        require_plan_signoff: this.state.config.require_plan_signoff,
+        has_high_risk: hasHigh,
+        has_exclusive: hasExclusive,
+        has_contracts: hasContracts,
+      },
+    };
+    const p = path.join(this.runDir, "planning", "plan-auto-accepted.json");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, `${JSON.stringify(marker, null, 2)}\n`, "utf-8");
   }
 
   /** 读取 planning/service-contracts.yaml; 不存在表示单服务 run (返回 null)。 */

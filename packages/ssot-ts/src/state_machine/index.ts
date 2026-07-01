@@ -7,3 +7,4 @@
  */
 export * from "./transitions.js";
 export * from "./human_anchors.js";
+export * from "./plan_auto_accept.js";

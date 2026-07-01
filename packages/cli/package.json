@@ -1,6 +1,6 @@
 {
   "name": "e2e-loop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -26,10 +26,10 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@e2e-loop/shared": "^1.0.0",
-    "@e2e-loop/adapter-claude-code": "^1.0.0",
-    "@e2e-loop/adapter-opencode": "^1.0.0",
-    "@e2e-loop/ssot": "^1.0.0",
+    "@e2e-loop/shared": "^1.1.0",
+    "@e2e-loop/adapter-claude-code": "^1.1.0",
+    "@e2e-loop/adapter-opencode": "^1.1.0",
+    "@e2e-loop/ssot": "^1.1.0",
     "@types/node": "^20.11.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"

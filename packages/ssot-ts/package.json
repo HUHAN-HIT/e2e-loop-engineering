@@ -1,6 +1,6 @@
 {
   "name": "@e2e-loop/ssot",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -78,7 +78,7 @@
   },
   "dependencies": {
     "zod": "^3.23.0",
-    "@e2e-loop/shared": "^1.0.0",
+    "@e2e-loop/shared": "^1.1.0",
     "js-yaml": "^4.1.0"
   },
   "files": [

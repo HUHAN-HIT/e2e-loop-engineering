@@ -401,6 +401,50 @@ test("IMPLEMENTING + 无 running/pending + 剩余全 blocked → deny", async ()
 });
 
 // ---------------------------------------------------------------------------
+// 用例 8d: simple 免签后 IMPLEMENTING + 有 pending task + 显式无 human_pending → deny 催继续
+// (回归固化: simple run 跳过 plan_signoff/免签后直接进 IMPLEMENTING, run-state 无
+//  human_pending。此时 tick 尚未派发、仍有 pending task, checkImplementingPhase
+//  必须落到既有 "pending → deny" 分支催继续 tick 派发, 而非被误当人锚点放行早停。
+//  与 8b 的区别: 显式写 human_pending=null, 固化 "免签流程不早停" 这一具体链路。)
+// ---------------------------------------------------------------------------
+
+test("simple 免签后 IMPLEMENTING + 有 pending task + 无 human_pending → deny 催继续", async () => {
+  const repoRoot = makeRepoRoot("signofffree");
+  const planWithPending =
+    "schema: loop-engineering.task-plan.v2\n" +
+    "complexity: simple\n" +
+    "tasks:\n" +
+    "  - id: t1\n" +
+    "    title: todo task\n" +
+    "    allowed_write_paths:\n" +
+    "      - src/**\n" +
+    "    acceptance_refs:\n" +
+    "      - AC1\n" +
+    "    status: pending\n";
+  makeRun(
+    repoRoot,
+    "20260101-001",
+    {
+      run_id: "20260101-001",
+      phase: "IMPLEMENTING",
+      complexity: "simple",
+      trust_mode: "collaborative",
+      // 免签: 显式无 human_pending, 证明落到 "有 pending → deny" 分支而非人锚点放行
+      human_pending: null,
+      active_tasks: [],
+    },
+    planWithPending,
+  );
+
+  const out = await handleGuardAnchors(stopInput(repoRoot));
+  expect(out.decision).toBe("deny");
+  const reason = (out as { reason?: string }).reason ?? "";
+  // reason 应指出还有 pending task 待推进、不该结束回合 (与 8b 断言字样一致)
+  expect(reason).toContain("pending");
+  expect(reason).toContain("结束回合");
+});
+
+// ---------------------------------------------------------------------------
 // 用例 9: phase=CREATED / CLARIFYING (无 human_pending) → allow (自动推进)
 // ---------------------------------------------------------------------------
 

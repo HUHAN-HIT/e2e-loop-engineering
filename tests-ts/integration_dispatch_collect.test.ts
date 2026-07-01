@@ -130,13 +130,11 @@ test("[CLI 端到端] dispatch→collect-outcome 闭环: 单 task 通过 → 自
     state.capabilities = { git_diff: false, fs_snapshot: false };
     fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
 
-    // 2. plan → PLANNING + human_pending=plan_signoff
+    // 2. plan → 干净 simple 免签直进 IMPLEMENTING (默认 config, 无 --require-plan-signoff);
+    //    免签后无需 signoff-plan, plan 命令已使其 IMPLEMENTING。
     run("plan", runId, "--design", designPath, "--task-plan", planPath);
 
-    // 3. signoff-plan → IMPLEMENTING
-    run("signoff-plan", runId);
-
-    // 4. dispatch → 输出 packets JSON
+    // 3. dispatch → 输出 packets JSON
     const dispOut = run("dispatch", runId);
     const disp = JSON.parse(dispOut) as {
       run_id: string;
@@ -203,8 +201,8 @@ test("[CLI 端到端] collect-outcome 失败: 写失败的 test-results → reas
     state.capabilities = { git_diff: false, fs_snapshot: false };
     fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
 
+    // 免签: plan 直进 IMPLEMENTING (默认 config), 无需 signoff-plan。
     run("plan", runId, "--design", designPath, "--task-plan", planPath);
-    run("signoff-plan", runId);
     run("dispatch", runId);
 
     // 写失败的 test-results
@@ -263,8 +261,8 @@ test("[CLI 端到端] bootstrap 降级: 跳过 dispatch, 手动翻 running + 写
     state.capabilities = { git_diff: false, fs_snapshot: false };
     fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
 
+    // 免签: plan 直进 IMPLEMENTING (默认 config), 无需 signoff-plan。
     run("plan", runId, "--design", designPath, "--task-plan", planPath);
-    run("signoff-plan", runId);
 
     // === 不调 dispatch, 直接模拟野生 task (绕过 dispatch.json 落盘) ===
     // 修改 task-plan.yaml: T01 status=running, attempt=1
@@ -336,8 +334,8 @@ test("[CLI 端到端] dispatch 输出 packets JSON 结构: {run_id, phase, human
     state.capabilities = { git_diff: false, fs_snapshot: false };
     fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
 
+    // 免签: plan 直进 IMPLEMENTING (默认 config), 无需 signoff-plan。
     run("plan", runId, "--design", designPath, "--task-plan", planPath);
-    run("signoff-plan", runId);
 
     const dispOut = run("dispatch", runId);
     const disp = JSON.parse(dispOut) as {

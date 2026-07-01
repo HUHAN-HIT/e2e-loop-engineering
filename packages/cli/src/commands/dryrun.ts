@@ -360,6 +360,11 @@ export function runInit(args: Args): number {
     complexity,
     phase: Phase.CREATED,
   };
+  // --require-plan-signoff (opt-out 开关): 写 config.require_plan_signoff=true, 让干净 simple
+  // plan 回到人工 plan 门禁 (默认免签); 不给该 flag 时保持 schema 默认 (false → 自动接受)。
+  if (args.flags.has("require-plan-signoff")) {
+    stateInput.config = { require_plan_signoff: true };
+  }
   if (allocation.binding !== null) {
     const bindingPath = worktreeBindingPath(runDir);
     writeWorktreeBinding(bindingPath, allocation.binding);
@@ -493,9 +498,16 @@ export function runPlan(args: Args): number {
     coord.startPlanning();
   }
   coord.submitPlan(plan);
+  // 免签检测: submitPlan 对干净 simple plan 免签直进 IMPLEMENTING 时会写 plan-auto-accepted.json
+  // (诚实审计标记), stdout 追加说明; 措辞用 "auto-accepted"/"免签", 绝不称 "签署"。
+  const autoAccepted = fs.existsSync(
+    path.join(runDir, "planning", "plan-auto-accepted.json"),
+  );
   process.stdout.write(
     `run ${runId}: PLANNING 提交完成, phase=${coord.state.phase}, ` +
-      `human_pending=${humanPendingText(coord.state.human_pending)}\n`,
+      `human_pending=${humanPendingText(coord.state.human_pending)}` +
+      (autoAccepted ? " (auto-accepted: simple 免签, 无人工签署)" : "") +
+      `\n`,
   );
   return 0;
 }

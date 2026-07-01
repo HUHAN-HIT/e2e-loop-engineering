@@ -75,6 +75,9 @@ export function parseCliArgs(tokens: string[]): Args {
     reason: { type: "string" as const },
     feedback: { type: "string" as const },
     reject: { type: "boolean" as const },
+    // --require-plan-signoff: init 的 opt-out 开关, 写 config.require_plan_signoff=true,
+    //   让干净 simple plan 回到人工 plan 门禁 (默认免签)。布尔 flag, 落 flags Set。
+    "require-plan-signoff": { type: "boolean" as const },
     // --ac 可多次出现, 收集为列表 (amend 触及的 AC ids)。
     ac: { type: "string" as const, multiple: true as const },
     // --- 真实 run 子命令 (M7C) ---

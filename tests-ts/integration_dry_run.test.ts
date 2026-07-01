@@ -367,18 +367,18 @@ test("[CLI 入口端到端] node 跑 dist/index.js: init→plan→signoff-plan�
     expect(fs.existsSync(path.join(runDir, "input", "requirement.md"))).toBe(true);
     expect(readRunState(runDir).phase).toBe(Phase.CREATED);
 
-    // plan → PLANNING + human_pending=plan_signoff, design/task-plan 落盘
+    // plan → 干净 simple 免签直进 IMPLEMENTING, stdout 含 auto-accepted, 无 plan_signoff。
+    // design/task-plan + plan-auto-accepted.json 落盘。
     const planOut = run("plan", runId, "--design", designPath, "--task-plan", planPath);
-    expect(planOut).toContain("human_pending=plan_signoff");
+    expect(planOut).toContain("phase=IMPLEMENTING");
+    expect(planOut).toContain("auto-accepted");
     expect(fs.existsSync(path.join(runDir, "planning", "design.md"))).toBe(true);
     expect(fs.existsSync(path.join(runDir, "planning", "task-plan.yaml"))).toBe(true);
-    expect(readRunState(runDir).phase).toBe(Phase.PLANNING);
-    expect(readRunState(runDir).human_pending).toBe(HumanPending.plan_signoff);
-
-    // signoff-plan → IMPLEMENTING
-    const spOut = run("signoff-plan", runId);
-    expect(spOut).toContain("accepted");
+    expect(
+      fs.existsSync(path.join(runDir, "planning", "plan-auto-accepted.json")),
+    ).toBe(true);
     expect(readRunState(runDir).phase).toBe(Phase.IMPLEMENTING);
+    expect(readRunState(runDir).human_pending ?? null).toBeNull();
 
     // run → tick 循环 (echo 占位 worker 不满足 planned case, 停在 IMPLEMENTING, 与 Python CLI 一致)
     const runOut = run("run", runId);
@@ -391,6 +391,53 @@ test("[CLI 入口端到端] node 跑 dist/index.js: init→plan→signoff-plan�
     expect(statusOut).toContain("navigation_map:");
     expect(statusOut).toContain("IMPLEMENTING:");
     expect(statusOut).toContain("next_action:");
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 8. CLI opt-out: init --require-plan-signoff → 干净 simple plan 仍停 plan 门禁
+// ---------------------------------------------------------------------------
+
+test("[CLI 入口 opt-out] init --require-plan-signoff → plan 后仍 PLANNING + plan_signoff (不免签)", () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "loop-cli-optout-"));
+  try {
+    const reqPath = path.join(SMOKE, "req.md");
+    const designPath = path.join(SMOKE, "design.md");
+    const planPath = path.join(SMOKE, "task-plan.yaml");
+    const runsRoot = path.join(work, "runs");
+
+    const run = (...argv: string[]): string =>
+      execFileSync(process.execPath, [CLI_BUNDLE, ...argv, "--runs-root", runsRoot], {
+        cwd: work,
+        encoding: "utf-8",
+      });
+
+    // init --require-plan-signoff → CREATED, config.require_plan_signoff=true
+    const initOut = run("init", reqPath, "--worktree-mode", "none", "--require-plan-signoff");
+    const runId = initOut.match(/created run: (\d{8}-\d{3})/)![1]!;
+    const runDir = path.join(runsRoot, runId);
+    // config 写入校验: run-state.json 含 require_plan_signoff=true
+    const rawState = JSON.parse(
+      fs.readFileSync(path.join(runDir, "run-state.json"), "utf-8"),
+    ) as { config?: { require_plan_signoff?: boolean } };
+    expect(rawState.config?.require_plan_signoff).toBe(true);
+
+    // plan → opt-out 拉回门禁: 仍 PLANNING + plan_signoff, 无 plan-auto-accepted.json
+    const planOut = run("plan", runId, "--design", designPath, "--task-plan", planPath);
+    expect(planOut).toContain("human_pending=plan_signoff");
+    expect(planOut).not.toContain("auto-accepted");
+    expect(readRunState(runDir).phase).toBe(Phase.PLANNING);
+    expect(readRunState(runDir).human_pending).toBe(HumanPending.plan_signoff);
+    expect(
+      fs.existsSync(path.join(runDir, "planning", "plan-auto-accepted.json")),
+    ).toBe(false);
+
+    // signoff-plan → IMPLEMENTING (opt-out 后人工门禁流程仍可推进)
+    const spOut = run("signoff-plan", runId);
+    expect(spOut).toContain("accepted");
+    expect(readRunState(runDir).phase).toBe(Phase.IMPLEMENTING);
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }

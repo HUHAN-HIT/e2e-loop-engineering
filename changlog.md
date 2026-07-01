@@ -7,6 +7,34 @@
 
 首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
 
+### 修复 — 目标项目阶段 0 CLI 定位修错配, 接线 doctor (2026-07-01)
+
+观察到协调会话在**目标项目**(被 install 过资产、无 `packages/` 的普通仓库, 如 jeepay3)里跑阶段 0 时,
+仍做一串无谓 shell 探测(`which e2e-loop` / `e2e-loop --version` / `e2e-loop --help | head` / `ls .claude/hooks`),
+并据此**误判**"CLI 只暴露 install/uninstall"。经核对: 该目标项目的 SKILL.md **已是最新**(含 §3.5、行数与源
+`core/coordinator.md` 一致), 全局 `e2e-loop@1.0.0` **功能完整**(`init`/`plan`/`run`/`dispatch`/`doctor` 全有)——
+故此坑与 2026-06-30 那条的"旧快照未传播"**无关**, 是**提示词与目标项目形态错配**:
+
+- 根因①: §3.5 原写"不确定就直接用项目内入口 `node packages/cli/dist/index.js`", 但目标项目**没有 `packages/`**,
+  该逃生路径落空, 协调器被逼回退 `where`/`which` —— 恰是 §3.5 前半句禁止的动作(自相矛盾)。
+- 根因②: 协调器用 `e2e-loop --version`(CLI 无此顶层标志 → 报"缺少子命令")+ `--help | head -N`(截断子命令列表)
+  去探能力, 两个错误叠加 → 把功能完整的 CLI 误判成"只有 install/uninstall"。
+- 根因③: `f6caf9d` 加了 `e2e-loop doctor` 却未在 `core/coordinator.md` 接线, 协调器不知该用它做机械 preflight。
+
+修复(均在 `core/coordinator.md`):
+
+- **§3.5 `e2e-loop` 定位改为分运行形态**: 目标项目里 `e2e-loop` 就是 install 写进 `settings.json` 的命令
+  (默认全局 `e2e-loop`, 功能完整), 直接调用即可; 源码 checkout 里才用 `node packages/cli/dist/index.js`。
+  显式禁止 `e2e-loop --version`(无此标志)与 `e2e-loop --help | head -N`(截断致误判)这两种探测手法,
+  要看子命令就**完整**读 `--help` 或跑 `doctor`。
+- **接线 doctor**: 两种形态都指向 `e2e-loop doctor`(源码 checkout 可 `--json` 一把梭校验入口/产物/文档);
+  阶段 0 的"不要 shell 现探"清单补入 `e2e-loop --version`, 并回指 §3.5 的形态定位与 doctor。
+- **doctor 目标项目适配未纳入本次**: 当前 `doctor` 的 `findRepoRoot` 面向源码 checkout(找 `core/manifest.json`
+  + `packages/cli`), 在目标项目里会报多项 fail; 故本次措辞只在**源码 checkout**场景把 doctor 当一把梭,
+  目标项目场景以 SessionStart 注入的 `active_run` + 直接调用全局 `e2e-loop` 为准(避免接线后在目标项目误导)。
+- **传播**: 已装目标项目的 SKILL.md 需 `e2e-loop install --host cc --project-dir <target> --force` 重装方生效
+  (源仓库 `core/coordinator.md` 是 SSOT)。
+
 ### 修复 — 协调器补 shell 纪律, 阶段 0 bootstrap 不再无谓 shell 探测 (2026-06-30)
 
 观察到协调会话在 Windows 上做阶段 0 worktree bootstrap 时, 把 PowerShell 语法

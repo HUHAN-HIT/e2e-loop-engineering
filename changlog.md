@@ -3,9 +3,7 @@
 本文件记录 Loop Engineering 工程的版本演进。版本号对齐 `core/manifest.json`。
 每条修改登记在该版本下, 按"新增 / 修复 / 移除 / 文档"分类。
 
-## 1.0.0 (2026-06-29)
-
-首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
+## 1.1.0 (2026-07-01)
 
 ### 新增 — plan 拍板条件锚点化 (simple 免签) (2026-07-01)
 
@@ -22,6 +20,10 @@
 - **CLI**: `e2e-loop init` 新增 `--require-plan-signoff` 标志, 把该开关写入 run-state.config。
 - **文档**: `docs/loop-engineering-collaborative-design.md` (§1 / §7)、`docs/loop-engineering-master-prompt.md`、
   `docs/loop-engineering-prompts.md` 加 2026-07-01 方法论演进注, 把原"无条件计划拍板"表述限定为条件锚点。
+
+## 1.0.0 (2026-06-29)
+
+首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
 
 ### 修复 — actual_writes 误判 harness bootstrap 产物为 worker 越界 + install 落 .gitignore 托管块 (2026-07-01)
 

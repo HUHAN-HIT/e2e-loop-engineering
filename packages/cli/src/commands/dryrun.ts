@@ -894,6 +894,8 @@ interface RunOverviewRow {
   complexity: string;
   human_pending: string | null;
   workdir: string | null;
+  /** run 的实际物理目录 (无论 none/worktree 都是真实位置; EnterWorktree 化后 none run 也在 worktree)。 */
+  dir: string;
 }
 
 /** 扫一个 runs 根下所有 <run_id>/run-state.json, 收集概览行 (非 run 目录 / 坏 state 跳过)。 */
@@ -906,9 +908,10 @@ function collectRunsUnder(runsRoot: string, rows: RunOverviewRow[]): void {
   }
   for (const e of entries) {
     if (!e.isDirectory()) continue;
+    const runDir = path.join(runsRoot, e.name);
     let state;
     try {
-      state = readRunState(path.join(runsRoot, e.name));
+      state = readRunState(runDir);
     } catch {
       continue;
     }
@@ -918,6 +921,7 @@ function collectRunsUnder(runsRoot: string, rows: RunOverviewRow[]): void {
       complexity: state.complexity,
       human_pending: state.human_pending ?? null,
       workdir: state.workdir ?? null,
+      dir: runDir,
     });
   }
 }
@@ -962,10 +966,9 @@ export function runRuns(args: Args): number {
   }
   process.stdout.write(`共 ${rows.length} 个 run:\n`);
   for (const r of rows) {
-    const wd = r.workdir ?? "(none 模式, 主根)";
     process.stdout.write(
       `  ${r.run_id}  phase=${r.phase}  human_pending=${humanPendingText(r.human_pending)}` +
-        `  complexity=${r.complexity}  workdir=${wd}\n`,
+        `  complexity=${r.complexity}  dir=${r.dir}\n`,
     );
   }
   return 0;

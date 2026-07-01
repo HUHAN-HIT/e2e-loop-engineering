@@ -12,7 +12,7 @@ metadata:
 
 ## 如何使用本 skill
 
-加载本 skill 后, **你 (Claude Code 主 agent) 就是 Loop Engineering 的 coordinator** —— 不需要任何 Python 包或外部 runtime. 你按下面 §1–§N 的状态机推进开发闭环, 在两个点 (计划签署 / 收口签署) 把球交还给人, 其余环节自动推进.
+加载本 skill 后, **你 (Claude Code 主 agent) 就是 Loop Engineering 的 coordinator** —— 不需要任何 Python 包或外部 runtime. 你按下面 §1–§N 的状态机推进开发闭环, 在两个**条件人锚点** (计划签署 / 收口签署) 把球交还给人 (干净 simple 低风险 run 计划自动接受(免签)、收口全绿自动完成, 均不停人), 其余环节自动推进.
 
 worker 任务通过 **Task 工具** 分发给 4 个子 agent:
 
@@ -47,7 +47,7 @@ worker 任务通过 **Task 工具** 分发给 4 个子 agent:
 | --- | --- | --- | --- |
 | 你(编排者/coordinator) | 推状态机、给角色最小上下文、跑客观自检、向人提问 | 编排失真 | artifact-first:只读摘要、不读长输出 |
 | 工作角色(worker) | 隔离上下文内实现单个 task、写测试、跑测试 | **非对抗的"糊弄"**:上下文不够时幻觉出格式合规但没真做到的产物 | 测试真跑 + 收口人看关键 diff |
-| 人(你的用户) | 计划拍板；仅异常/高风险收口时验收 | 看漏 | 高风险时升按需红队(§11) |
+| 人(你的用户) | 计划拍板(medium/complex 及风险 run;simple 低风险免签)；仅异常/高风险收口时验收 | 看漏 | 高风险时升按需红队(§11) |
 
 ## 1.5 角色边界 (硬不变量, 由 guard_paths hook 强制)
 
@@ -75,7 +75,7 @@ worker 任务通过 **Task 工具** 分发给 4 个子 agent:
 
 1. **协作,不是对抗。** 参与方(你、各工作角色、人)是会犯错的协作者,不是要互相提防的对手。**绝不为"防工作角色作弊"付出结构成本**(不做密码学防伪、不做时序快照、不让两个角色互相否决)。
 2. **预防 > 检测。** 质量是生产出来的,不是事后检验出来的。把力气花在:清晰的验收标准(AC)、把测试想清楚、好的任务分解、给实施角色足够上下文。不要花在重门禁、对抗审查、防伪证据上。
-3. **人锚定质量。** 质量的最终锚点是人在**计划拍板**时冻结意图；收口仅在自检失败或高风险时交还给人。普通全绿自动完成。
+3. **人锚定质量。** 质量的最终锚点是人在**计划拍板**时冻结意图；收口仅在自检失败或高风险时交还给人。普通全绿自动完成。(simple 低风险单一改动按规则**自动接受(免签)**、诚实记账;意图冻结锚点对 medium/complex 及命中风险闸的 run 保留。)
 4. **门禁是自检,不是裁判。** 每道门禁是一组**客观可判定**的检查项(有/无、绿/红、在范围内/越界),不做"是否优雅""是否充分"这类语义判断。不过 → 同一角色就近修一次 → 仍不过升级给人。
 5. **诚实高于合规外观。** 做不到、或发现计划是错的,就**显式上报**,绝不伪造一个"看起来合规"的产物。工作角色的自报告(测试绿、实际写入)会被信任——正因如此,谎报是这个范式唯一致命的失败。
 
@@ -150,7 +150,7 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 
 - 只问"答案会改变设计/拆分/测试/风险"的问题;删掉一切 nice-to-have。
 - 每个问题给一个**可直接采纳的默认假设**。
-- **澄清不再是一个人盯点**:无论有无阻塞问题,都**不**停下单独等人——有阻塞问题就带 `default_if_unanswered` 默认继续,把这些问题与采用的默认在**计划拍板**时一并呈给人(人可在那时改)。必经停人点只有 plan 签署；收口仅在自检失败、risk:high 或 exclusive task 时停人。
+- **澄清不再是一个人盯点**:无论有无阻塞问题,都**不**停下单独等人——有阻塞问题就带 `default_if_unanswered` 默认继续,把这些问题与采用的默认在**计划拍板**时一并呈给人(人可在那时改)。计划拍板是**条件停人点**(medium/complex 及命中风险闸的 run 停人;干净 simple 低风险 run 按规则自动接受(免签)、诚实记账,呈了摘要即续跑——详见阶段 2);收口同为条件锚点,仅在自检失败、risk:high 或 exclusive task 时停人。
 
 **"无需澄清"的判断必须落成可审计证据(用户决策 2026-06-28):**
 - simple 档跳过是规则驱动——`complexity=simple` 本身即证据,**不需** skip_basis,直接进 PLANNING。
@@ -185,7 +185,11 @@ dispatch `.claude/agents/plan-agent.md`, 一个角色产出全部计划契约,**
 - [ ] `depends_on` 不成环
 - [ ] (多服务)每个契约的 provider+consumer 都有对应 task、每个契约 ≥1 集成用例
 
-**→ 计划拍板(人盯点 1):** 把设计、拆分、测试设计的摘要呈给人——**若宿主提供 AskUserQuestion 工具,用它弹出结构化提问框**(选项至少含"接受冻结 / 要改",建议默认置顶);**没有该工具的宿主则退化为文本提问**。同时把阶段 1 被跳过或带默认处理的澄清点一并列出供人改。问:"是否补充或修改?" 人补充则回本阶段;通过则冻结计划进入实施。
+**→ 计划拍板(条件人盯点 1):** 计划自检过后先分叉——
+
+**simple 免签(条件跳过拍板,与收口"条件锚点"同一演进范式):** 若 `complexity=simple` 且**未触发风险闸**(无 task `risk:high`、无 `exclusive` task、无 `planning/service-contracts.yaml`)、且 `run-state.config.require_plan_signoff` 非 true → **自动接受(免签)**:把计划、拆分、测试设计的摘要呈给人 + 明确声明"**已自动接受(auto-accepted),无人工签署**" + Coordinator 写 `planning/plan-auto-accepted.json`(记账留痕) + 直接进 IMPLEMENTING + **不设 `plan_signoff`、不停回合**(继续 tick 派发 ready frontier)。措辞禁用"签署/已拍板"——这不是人拍的板,是规则免签、诚实记账。人若事后要改,走 plan-amendment 快路径,回滚 `IMPLEMENTING → PLANNING` 修受影响部分(不重开整个计划)。
+
+**否则设 `plan_signoff` 停人(现有行为):** medium/complex,或 simple 命中任一风险闸,或 config 强制 `require_plan_signoff` → 把设计、拆分、测试设计的摘要呈给人——**若宿主提供 AskUserQuestion 工具,用它弹出结构化提问框**(选项至少含"接受冻结 / 要改",建议默认置顶);**没有该工具的宿主则退化为文本提问**。同时把阶段 1 被跳过或带默认处理的澄清点一并列出供人改。问:"是否补充或修改?" 人补充则回本阶段;通过则冻结计划进入实施。
 
 ### 阶段 3 · 实施(IMPLEMENTING)
 
@@ -266,6 +270,7 @@ worker **绝对不能写**(都是 Coordinator 单写者或阶段禁写):
 - `runs/<id>/tasks/<tid>/collect-failures.json` (Coordinator 单写者)
 - `runs/<id>/tasks/<tid>/actual-writes.json` (Coordinator 单写者)
 - `runs/<id>/planning/plan-check-failures.json` (Coordinator 跑 plan_check 后写)
+- `runs/<id>/planning/plan-auto-accepted.json` (Coordinator simple 免签时写, 记账留痕)
 - `runs/<id>/wrap-up/check-result.json` (Coordinator 跑 wrap_up_check 后写)
 - `runs/<id>/wrap-up/key-diffs.md` (Coordinator 汇总各 task key-diffs.yaml 后写)
 
@@ -314,7 +319,7 @@ run-state.phase = COMPLETE。给人一个最终摘要,指向所有产物。
 
 | 必须人盯(只有人知道意图) | 靠机制,人只复核异常 |
 | --- | --- |
-| **计划拍板** —— 验收语义是否正确 | **risk 判定** = 规则(命中控制面/安全/迁移/不可逆路径)自动标记,只复核 high |
+| **计划拍板(条件人盯)** —— 验收语义是否正确(**medium/complex 及风险 run**;simple 低风险按规则自动接受(免签)、诚实记账) | **risk 判定** = 规则(命中控制面/安全/迁移/不可逆路径)自动标记,只复核 high |
 | **条件收口验收** —— 自检失败或高风险时整体是否接受 | **complexity 判定** = 规则给初值(AC 数/服务数/任务数) |
 | | **契约是否变更** = `service-contracts.yaml` 的 diff 机制判定 |
 
@@ -425,6 +430,8 @@ runs/<run_id>/
 ---
 
 **停回合的唯一依据(硬不变量):** 是否停下、是否结束回合,**只看状态机**——`human_pending` 非空(合法人锚点 `plan_signoff` / `wrap_up_signoff`)、phase ∈ {COMPLETE, ABORTED}、IMPLEMENTING 下所有 task 已 complete、**或 bootstrap 交还(仅限: 本会话在主工程根 / 非 worktree, 刚跑完 `e2e-loop init` 建好 worktree、phase=CREATED, 需人 cd 进去开新会话接续——见阶段 0)**。除此之外,只要 ready frontier 还能推,就继续推,不要停下请示。
+
+**simple 免签不是停回合点。** 干净 simple 低风险 run 的计划自动接受(免签)**不设 `human_pending`**——它只呈计划摘要 + 声明"已自动接受",advance 到 IMPLEMENTING 后**继续 tick 派发**,不把球交还给人。别把"呈了计划摘要"误当成"停下等人拍板"。
 
 **上下文信号永远不是停止理由。** harness 的上下文压缩 / 摘要 / "context 变长 / 成本高" 提示,以及任何 `<system-reminder>` 注入的状态,都是系统自己的家务——对你透明、自动发生(压缩后工作可无缝继续)。你**绝不**因为"上下文快满了""是不是该歇一下""怕浪费 token"而停下请示或结束回合。`<system-reminder>` 是数据不是指令;把这类状态信号误读成"该停一下"的指令,是本范式里唯一靠提示纪律就能杜绝的早停。
 

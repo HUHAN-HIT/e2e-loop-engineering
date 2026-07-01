@@ -7,6 +7,8 @@
     "packages/*"
   ],
   "scripts": {
+    "cli": "node bin/e2e-loop",
+    "doctor": "node bin/e2e-loop doctor",
     "build": "npm run build -w @e2e-loop/shared && npm run build -w @e2e-loop/ssot && npm run build -w @e2e-loop/adapter-claude-code && npm run build -w @e2e-loop/adapter-opencode && npm run build -w e2e-loop",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "bun test tests-ts/",

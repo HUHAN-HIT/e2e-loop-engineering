@@ -59,6 +59,8 @@ export function parseCliArgs(tokens: string[]): Args {
     "cli-command": { type: "string" as const },
     help: { type: "boolean" as const },
     h: { type: "boolean" as const },
+    json: { type: "boolean" as const },
+    doc: { type: "string" as const },
     // --- dry-run 子命令 ---
     "runs-root": { type: "string" as const },
     complexity: { type: "string" as const },

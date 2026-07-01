@@ -44,6 +44,21 @@ npm run build      # 构建 adapter-cc hooks (.mjs) + adapter-oc plugin (.js) + 
 node packages/cli/dist/index.js install --host both --project-dir <path>
 ```
 
+源码 checkout 的 CLI 入口是 TypeScript monorepo 形态, 不是旧的 Python
+`loop_engineering/cli.py`:
+
+- root shim: `bin/e2e-loop`
+- package bin: `packages/cli/package.json` -> `dist/index.js`
+- source entry: `packages/cli/src/index.ts`
+- built entry: `packages/cli/dist/index.js`
+
+启动 run 前可以先做机械自检:
+
+```bash
+npm run doctor -- --doc docs/superpowers/specs/2026-06-30-task-plan-detail-split-design.md
+npm run cli -- help
+```
+
 ---
 
 ## CLI 命令族
@@ -55,6 +70,7 @@ node packages/cli/dist/index.js install --host both --project-dir <path>
 | `install`   | 安装 Claude Code / OpenCode 资产到目标项目 (`--host`, `--project-dir`, `--force`, `--dry-run`) |
 | `uninstall` | 卸载已安装资产 (只删本工具装的) |
 | `list`      | 列出目标项目下本工具管理的资产 |
+| `doctor`    | 启动前自检 CLI 入口、构建产物与可选设计文档路径 |
 
 算法 dry-run (本地骨架验证, worker 用 echo 占位):
 

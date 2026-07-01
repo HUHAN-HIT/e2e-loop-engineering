@@ -181,6 +181,9 @@ function setupImplementing(
         watchdog_timeout_min: { simple: 15, medium: 30, complex: 60 },
         max_retries_per_task: opts?.maxRetries ?? 1,
         max_concurrency: 4,
+        // 保留人工 plan 门禁 (下游 dispatch/collect 流程测试, 非免签测试): 干净 simple plan
+        // 默认已免签直进 IMPLEMENTING, 此处显式 opt-out 保留 signoffPlan(true) 序列不变。
+        require_plan_signoff: true,
       },
     }),
   );
@@ -314,6 +317,8 @@ test("[collect] bootstrap 降级: 无 dispatch.json + 磁盘有 artifact → act
       complexity: "simple",
       phase: Phase.CREATED,
       capabilities: NO_CAPS,
+      // 保留人工 plan 门禁 (下游 collect bootstrap 流程测试, 非免签测试)。
+      config: { require_plan_signoff: true },
     }),
   );
   fs.mkdirSync(path.join(runDir, "planning"), { recursive: true });
@@ -673,6 +678,8 @@ test("[dispatch] worktree binding 存在时 packet.workdir 使用 binding worktr
       complexity: "simple",
       phase: Phase.CREATED,
       capabilities: NO_CAPS,
+      // 保留人工 plan 门禁 (下游 worktree binding dispatch 流程测试, 非免签测试)。
+      config: { require_plan_signoff: true },
     }),
   );
   fs.mkdirSync(path.join(runDir, "planning"), { recursive: true });

@@ -58,14 +58,25 @@ function makeTmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "loop-dryrun-"));
 }
 
-/** 建一个 run_dir + 写 CREATED 状态 (所有 runtime 测试的起点, 等价 Python `_make_run_dir`)。 */
+/**
+ * 建一个 run_dir + 写 CREATED 状态 (所有 runtime 测试的起点, 等价 Python `_make_run_dir`)。
+ *
+ * 注入 `config.require_plan_signoff=true`: 干净 simple plan 默认已免签直进 IMPLEMENTING,
+ * 这些 runtime 测试目的是下游流程 (端到端/plan-amendment/watchdog 等), 显式 opt-out
+ * 保留 submitPlan → plan_signoff → signoffPlan(true) 序列不变 (非免签本身的测试)。
+ */
 function makeRunDir(): string {
   const runsRoot = path.join(makeTmp(), "runs");
   const runId = "20260627-001";
   const runDir = initRunDir(runsRoot, runId, "test requirement");
   writeRunState(
     runDir,
-    parseRunState({ run_id: runId, complexity: COMPLEXITY_SIMPLE, phase: Phase.CREATED }),
+    parseRunState({
+      run_id: runId,
+      complexity: COMPLEXITY_SIMPLE,
+      phase: Phase.CREATED,
+      config: { require_plan_signoff: true },
+    }),
   );
   return runDir;
 }

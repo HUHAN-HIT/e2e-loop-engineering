@@ -127,7 +127,17 @@ test("[py: test_end_to_end_simple_run] CREATED→PLANNING→IMPLEMENTING→WRAPP
   const runsRoot = path.join(makeTmp(), "runs");
   const runId = "20260627-001";
   const runDir = initRunDir(runsRoot, runId, "test requirement");
-  writeRunState(runDir, parseRunState({ run_id: runId, complexity: "simple", phase: Phase.CREATED }));
+  // 保留人工 plan 门禁 (下游端到端流程测试, 非免签测试): 干净 simple plan 默认已免签
+  // 直进 IMPLEMENTING, 此处显式 opt-out 保留 plan_signoff + signoffPlan(true) 序列不变。
+  writeRunState(
+    runDir,
+    parseRunState({
+      run_id: runId,
+      complexity: "simple",
+      phase: Phase.CREATED,
+      config: { require_plan_signoff: true },
+    }),
+  );
 
   const runner = new RecordingWorkerRunner([completedOutcome(true)]);
   const coord = new Coordinator(runDir, runner);
@@ -237,7 +247,16 @@ test("[py: test_plan_amendment_during_implementing] worker 返回 plan_amendment
   const runsRoot = path.join(makeTmp(), "runs");
   const runId = "20260627-001";
   const runDir = initRunDir(runsRoot, runId, "test");
-  writeRunState(runDir, parseRunState({ run_id: runId, complexity: "simple", phase: Phase.CREATED }));
+  // 保留人工 plan 门禁 (下游 plan-amendment 流程测试, 非免签测试)。
+  writeRunState(
+    runDir,
+    parseRunState({
+      run_id: runId,
+      complexity: "simple",
+      phase: Phase.CREATED,
+      config: { require_plan_signoff: true },
+    }),
+  );
 
   const amendment = {
     status: "plan-amendment-needed" as const,
@@ -341,7 +360,16 @@ test("[新增] 单写者持久化: tick 后 task-plan.yaml 落盘, 新 Coordinat
   const runsRoot = path.join(makeTmp(), "runs");
   const runId = "20260627-001";
   const runDir = initRunDir(runsRoot, runId, "test");
-  writeRunState(runDir, parseRunState({ run_id: runId, complexity: "simple", phase: Phase.CREATED }));
+  // 保留人工 plan 门禁 (下游单写者持久化流程测试, 非免签测试)。
+  writeRunState(
+    runDir,
+    parseRunState({
+      run_id: runId,
+      complexity: "simple",
+      phase: Phase.CREATED,
+      config: { require_plan_signoff: true },
+    }),
+  );
 
   const runner = new RecordingWorkerRunner([completedOutcome(true)]);
   const coord = new Coordinator(runDir, runner);

@@ -109,6 +109,8 @@ export const RunConfigSchema = z.object({
   watchdog_timeout_min: WatchdogTimeoutsSchema.default({}),
   max_retries_per_task: z.number().int().default(1),
   max_concurrency: z.number().int().default(4),
+  // opt-out 开关: true → 强制恢复人工 plan 拍板 (即便 simple 免签条件满足)。默认 false = 默认免签。
+  require_plan_signoff: z.boolean().default(false),
 });
 export type RunConfig = z.infer<typeof RunConfigSchema>;
 

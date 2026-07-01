@@ -165,3 +165,10 @@ test("[补充] 非法 phase / complexity → 抛错", () => {
     RunStateSchema.parse({ run_id: "r1", complexity: "simple", phase: "WAT" }),
   ).toThrow();
 });
+
+test("[新增] RunConfig.require_plan_signoff 默认 false, 可 round-trip true", () => {
+  const def = RunConfigSchema.parse({});
+  expect(def.require_plan_signoff).toBe(false);
+  const on = RunConfigSchema.parse({ require_plan_signoff: true });
+  expect(on.require_plan_signoff).toBe(true);
+});

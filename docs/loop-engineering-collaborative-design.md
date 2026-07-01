@@ -73,7 +73,9 @@ CREATED
 
 人介入由 `run-state.human_pending` 标记 (方法论演进 2026-06-28: 删除 CLARIFYING 期的 `"clarification"` 独立停顿；收口从必经签收改为异常/高风险条件签收):
 
-- **必经质量锚定**: **计划拍板** (PLANNING 末, `"plan_signoff"`): "设计、拆分和测试设计如下, 是否补充或修改?" —— 质量最大杠杆在这里; 一并呈现被默认处理的澄清点。
+> 方法论演进 (2026-07-01): `plan_signoff` 对 `complexity=simple` 且未触发风险闸 (`risk: high` / `exclusive: true` / 存在 service-contracts)、未强制 `require_plan_signoff` 的 run 降级为条件锚点 —— `plan_check` 通过后自动接受 (免签) 进 IMPLEMENTING, 写 `planning/plan-auto-accepted.json` 诚实记账 (绝不记为人工签署)。medium/complex 及命中风险闸的 run 保留必经拍板。与 wrap_up_signoff 的条件锚点演进同构。
+
+- **必经质量锚定 (条件降级)**: **计划拍板** (PLANNING 末, `"plan_signoff"`): "设计、拆分和测试设计如下, 是否补充或修改?" —— 质量最大杠杆在这里; 一并呈现被默认处理的澄清点。simple 且未触发风险闸、未强制 `require_plan_signoff` 的 run 走自动接受 (免签) 路径 (见上 2026-07-01 演进), 不设此锚点。
 - **条件收口锚定**: **收口验收** (WRAPPING_UP 末, `"wrap_up_signoff"`): 仅当收口自检失败、存在 `risk: high` 或 `exclusive: true` task 时设置; 普通全绿直接 COMPLETE。
 
 ### 1.1 复杂度档位 (调摩擦, 不加官僚)
@@ -388,6 +390,8 @@ runs/<run_id>/
 5. ready frontier 调度 + 写路径隔离 (§3)
 6. per-task worker: 写测试 + 实现 + 跑测试
 7. 收口自动完成 / 条件验收
+
+> 方法论演进 (2026-07-01): 上述第 2 步的"计划拍板"对 `complexity=simple` 且未触发风险闸 (`risk: high` / `exclusive: true` / 存在 service-contracts)、未强制 `require_plan_signoff` 的 run 降级为条件锚点 —— `plan_check` 通过后自动接受 (免签) 进 IMPLEMENTING, 写 `planning/plan-auto-accepted.json` 诚实记账 (绝不记为人工签署)。medium/complex 及命中风险闸的 run 保留必经拍板。与第 7 步收口条件验收同构 (§1)。
 
 可暂缓: 按需红队 (§4)、`unattended` 档 (§5)、多「需求」并行与 worktree (多个独立需求各一 run, 仅当真有 ≥2 并行需求时再引入)。
 

@@ -7,6 +7,22 @@
 
 首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
 
+### 新增 — plan 拍板条件锚点化 (simple 免签) (2026-07-01)
+
+把 `plan_signoff` 从"无条件必经人盯点"演进为**条件锚点**, 与 `wrap_up_signoff` 的条件收口锚点同构 ——
+让 simple 且无风险的 run 不为一道形式化拍板停下等人, 同时对 medium/complex 及任何命中风险闸的 run 保留必经拍板。
+
+- **免签判据**: run `complexity=simple` **且**未触发风险闸 (无 `risk: high` / `exclusive: true` task、无 service-contracts)
+  **且**未强制 `require_plan_signoff` 时, `plan_check` 通过后**自动接受 (免签)** 进 IMPLEMENTING, 不设 `plan_signoff`
+  人锚点。medium/complex 或命中任一风险闸的 run 仍必经计划拍板。
+- **诚实记账 (绝不记为人工签署)**: 走免签路径的 run 在 `planning/plan-auto-accepted.json` 写下自动接受的审计标记
+  (记录 complexity、免签判据), 明确区别于人工签署 —— 遵循"诚实高于合规外观"红线, 免签路径永不伪装成人签。
+- **`RunConfig.require_plan_signoff` 开关**: schema 新增该字段 (默认 `false`); 置 `true` 可对任意 run **opt-out 回门禁**,
+  强制走必经计划拍板 (用于对 simple run 也想人工把关的场景)。
+- **CLI**: `e2e-loop init` 新增 `--require-plan-signoff` 标志, 把该开关写入 run-state.config。
+- **文档**: `docs/loop-engineering-collaborative-design.md` (§1 / §7)、`docs/loop-engineering-master-prompt.md`、
+  `docs/loop-engineering-prompts.md` 加 2026-07-01 方法论演进注, 把原"无条件计划拍板"表述限定为条件锚点。
+
 ### 修复 — actual_writes 误判 harness bootstrap 产物为 worker 越界 + install 落 .gitignore 托管块 (2026-07-01)
 
 - **根因**: harness 在目标项目里落的 bootstrap 产物 (`.claude/` / `.opencode/` / `.loop-engineering/` /

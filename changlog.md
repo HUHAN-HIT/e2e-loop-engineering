@@ -7,6 +7,35 @@
 
 首个正式发布到 npm registry 的版本 (5 包同发 `@e2e-loop/{shared,ssot,adapter-claude-code,adapter-opencode,cli}@1.0.0`)。
 
+### 变更 — worktree bootstrap 支持 EnterWorktree 同会话续跑, 消除被迫重开 (2026-07-01)
+
+问题: §0 规定主根会话 bootstrap 建 worktree 后停回合、让用户**重开**一个 worktree 会话续跑。逐层
+挖到本质: 重开不是隔离的内在要求, 是 loop 把 hook 治理绑定到"会话启动 cwd"的选择(hook 每次执行按
+`payload.cwd` 定位 run, run 在 `worktree/runs` 只有从 worktree 启动的会话 cwd 才对得上)。之前的
+"自动重开"补救(弹终端 `resume` / headless)全撞环境壁垒: 无交互桌面(SESSIONNAME 空)+ agent 起的
+子 claude 401 认证失败。
+
+突破口(已实测两层验证): Claude Code 的 `EnterWorktree` 是"**同一会话内**建 worktree + 切 session
+cwd", 不是重开。① cwd 探针证明 EnterWorktree 后 hook `payload.cwd` 跟随切到 worktree; ② 在装了
+hook 的目标项目里, worktree 内建 run 后 Write `.claude/` 被 deny、Write 源码被 phase 门禁 deny
+(reason 含 "phase=CREATED") —— 证明 `guard_paths` 在 worktree cwd 找到该 run 并按 phase 精准治理。
+即"同会话切进 worktree, 治理跟上, 不重开、不损治理"。
+
+- **coordinator §0 能力驱动分叉**(`core/coordinator.md`): 有 `EnterWorktree` 工具 → 调它切进
+  worktree + `e2e-loop init --worktree-mode none`(run 落 `worktree/runs`)+ **本会话直接续跑到
+  plan 签署, 零重开**; 无 `EnterWorktree`(OpenCode 等)→ 退回 `--worktree-mode auto` + `resume`/
+  重开(现状)。遵循既有"有 AskUserQuestion 则弹框、无则文本"的能力降级范式, 不破坏双宿主一致。收口
+  (COMPLETE)后 `ExitWorktree(action:"keep")` 保留分支供 commit/PR。
+- **run_id 跨 worktree 防撞**(`dryrun.ts` `allWorktreeRunsRoots`): none 模式序号源纳入所有 git
+  worktree 的 `runs/`(用 `git worktree list`), 避免各 EnterWorktree worktree 都从 `...-001` 撞号;
+  非 git 降级为空、不回归。
+- **`resume`/`runs` 降级为兜底而非主路径**: `resume`(上条新增的弹终端续跑)现仅作"无 EnterWorktree"
+  降级路径的手动兜底; `runs` 并行总览仍用。连带提交 `resume` run 定位修复(`locateRunDir`: 从主根也
+  能定位 worktree 模式 run)。
+- **测试**: `worktree_prompt_contract` 加 EnterWorktree 分叉断言; `cli_worktree_seq` 测防撞序号源;
+  `cli_resume` 定位回归。
+- **传播**: 已装目标项目需 `e2e-loop install --host cc --project-dir <target> --force` 重装 SKILL.md。
+
 ### 新增 — worktree bootstrap 自动弹终端续跑 + e2e-loop runs 并行总览 (2026-07-01)
 
 观察: 目标项目里 `e2e-loop init --worktree-mode auto` 建完隔离 worktree 后, 协调器按阶段 0 停回合,

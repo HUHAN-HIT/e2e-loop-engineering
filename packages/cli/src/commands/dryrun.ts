@@ -20,7 +20,7 @@
  * 用于本地骨架验证 (与 Python `_echo_worker_callback` 等价)。
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -77,6 +77,32 @@ function resolveRunsRoot(args: Args): string {
   const raw = args.values["runs-root"];
   const root = raw && raw.length > 0 ? raw : "runs";
   return path.resolve(root);
+}
+
+/**
+ * 列出所有 git worktree(主仓 + linked, 含 EnterWorktree 的 .claude/worktrees/* 与 loop 的
+ * .worktrees/*)的 runs/ 目录, 作为 run_id 序号源。
+ *
+ * 动机: EnterWorktree 化后每个 run 落在各自 worktree 的 runs/, 若 none 模式序号只扫当前
+ * worktree 的 runs/(彼此独立、都空), 会让不同 worktree 都从 YYYYMMDD-001 起 → 跨 worktree
+ * 撞号。用 git worktree list 把所有 worktree 的 runs/ 一并纳入序号源, 序号才能全局前进。
+ * 非 git 目录 / git 失败 → 返回 [], 序号退回只扫当前 cwd/runs(现有 none 行为, 不回归)。
+ */
+export function allWorktreeRunsRoots(cwd: string): string[] {
+  try {
+    const out = execFileSync("git", ["worktree", "list", "--porcelain"], {
+      cwd,
+      encoding: "utf-8",
+      timeout: 10_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return out
+      .split(/\r?\n/)
+      .filter((l) => l.startsWith("worktree "))
+      .map((l) => path.join(l.slice("worktree ".length).trim(), "runs"));
+  } catch {
+    return [];
+  }
 }
 
 /** run_id → run_dir。 */
@@ -313,7 +339,7 @@ export function runInit(args: Args): number {
   // 其下 created worktree 目录名即 run_id, 序号才能随已有 run 前进。none 模式仍只扫主仓 ./runs。
   const seqRoots =
     worktreeMode === "none"
-      ? [sequenceRunsRoot]
+      ? [sequenceRunsRoot, ...allWorktreeRunsRoots(process.cwd())]
       : [sequenceRunsRoot, resolveWorktreeRoot(process.cwd(), args.values["worktree-root"])];
   const runId = nextRunIdFromRoots(seqRoots);
   const allocation = allocateRunWorktree({
@@ -775,6 +801,29 @@ export function runCollectOutcome(args: Args): number {
 // ---------------------------------------------------------------------------
 
 /**
+ * 定位一个 run 的目录: 先主根 runs/<id> (none 模式), 再扫各 worktree 下的 runs/<id> (worktree 模式)。
+ *
+ * resume 从主工程根跑 (coordinator bootstrap 后就地调), 而 worktree 模式 run 的 run 目录在
+ * .worktrees/<worktree>/runs/<id> —— 不能只看主根 runs/ (否则 worktree run 永远定位不到)。
+ * 返回 null = 两处都没有该 run 的 run-state.json。
+ */
+function locateRunDir(args: Args, runId: string): string | null {
+  const mainDir = resolveRunDir(resolveRunsRoot(args), runId);
+  if (fs.existsSync(path.join(mainDir, "run-state.json"))) return mainDir;
+  try {
+    const wtRoot = resolveWorktreeRoot(process.cwd(), args.values["worktree-root"]);
+    for (const e of fs.readdirSync(wtRoot, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const d = path.join(wtRoot, e.name, "runs", runId);
+      if (fs.existsSync(path.join(d, "run-state.json"))) return d;
+    }
+  } catch {
+    /* 非 git / .worktrees 不存在 → 仅主根结果 (此处已 null) */
+  }
+  return null;
+}
+
+/**
  * resume 子命令: worktree 模式 run 的自动续跑入口。
  *
  * 读 run-state 拿 workdir, 弹一个新终端在该 worktree 里起 claude 会话续跑 (首条消息
@@ -796,15 +845,14 @@ export function runResume(
     process.stderr.write("错误: resume 需要位置参数 <run_id>\n");
     return 2;
   }
-  const runsRoot = resolveRunsRoot(args);
-  const runDir = resolveRunDir(runsRoot, runId);
-  let state;
-  try {
-    state = readRunState(runDir);
-  } catch {
-    process.stderr.write(`错误: run-state.json 不存在: ${runDir}\n`);
+  const runDir = locateRunDir(args, runId);
+  if (runDir === null) {
+    process.stderr.write(
+      `错误: 找不到 run ${runId} 的 run-state.json (主根 runs/ 与 .worktrees 下均无)\n`,
+    );
     return 2;
   }
+  const state = readRunState(runDir);
   const workdir = state.workdir;
   if (!workdir) {
     process.stdout.write(

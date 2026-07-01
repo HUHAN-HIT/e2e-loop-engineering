@@ -206,11 +206,36 @@ test("runResume: spawn 抛错 → 降级手动引导, 退出 0 (fail-safe)", () 
 
 test("runResume: run 不存在 → return 2", () => {
   const repo = makeTmp("missing");
+  initGitRepo(repo);
+  process.chdir(repo);
   const args = parseCliArgs(["resume", "nope", "--runs-root", path.join(repo, "runs")]);
   const { result, stderr } = withCapturedStreams(() => runResume(args, () => {}));
 
   expect(result).toBe(2);
-  expect(stderr).toContain("run-state.json 不存在");
+  expect(stderr).toContain("找不到 run");
+});
+
+test("runResume: worktree 模式 run 在 .worktrees 下 → 从主根定位到 (回归: 落地 bug 2026-07-01)", () => {
+  // resume 从主工程根跑, worktree 模式 run 的 run-state 在 .worktrees/<id>/runs/<id>,
+  // 不在主根 runs/ —— 早期 runResume 只查主根导致 "run-state.json 不存在"。
+  const repo = makeTmp("wt-locate");
+  initGitRepo(repo);
+  process.chdir(repo);
+  const runId = "20260101-050";
+  const wt = path.join(repo, ".worktrees", runId);
+  makeRun(path.join(wt, "runs"), runId, { workdir: wt });
+
+  const calls: unknown[] = [];
+  const args = parseCliArgs(["resume", runId]); // 不传 --runs-root, 从主根定位
+  const { result, stdout } = withCapturedStreams(() =>
+    runResume(args, () => {
+      calls.push(1);
+    }),
+  );
+
+  expect(result).toBe(0);
+  expect(calls.length).toBe(1);
+  expect(stdout).toContain("弹出新终端");
 });
 
 // ---------------------------------------------------------------------------

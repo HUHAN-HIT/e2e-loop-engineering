@@ -934,25 +934,23 @@ function collectRunsUnder(runsRoot: string, rows: RunOverviewRow[]): void {
  * 用法: e2e-loop runs [--runs-root <dir>] [--worktree-root <dir>] [--json]
  */
 export function runRuns(args: Args): number {
-  const rows: RunOverviewRow[] = [];
-  // 1. 主根 none 模式 run
-  collectRunsUnder(resolveRunsRoot(args), rows);
-  // 2. worktree 模式 run: .worktrees/<id>/runs/<id>/run-state.json
-  try {
-    const wtRoot = resolveWorktreeRoot(process.cwd(), args.values["worktree-root"]);
-    let wtEntries: fs.Dirent[] = [];
-    try {
-      wtEntries = fs.readdirSync(wtRoot, { withFileTypes: true });
-    } catch {
-      wtEntries = [];
-    }
-    for (const e of wtEntries) {
-      if (!e.isDirectory()) continue;
-      collectRunsUnder(path.join(wtRoot, e.name, "runs"), rows);
-    }
-  } catch {
-    // resolveWorktreeRoot 在非 git 目录抛错 → 只列主根 run (worktree 内跑本命令时的降级)。
-  }
+  // 收集所有 runs 根: 主根(--runs-root) + 所有 git worktree 的 runs/。allWorktreeRunsRoots
+  // 经 git worktree list 覆盖 EnterWorktree 的 .claude/worktrees/* 与 loop 自建的 .worktrees/*
+  // (与 run_id 防撞用的是同一份来源, 保持总览与序号一致); 非 git 目录降级为仅主根。
+  const collected: RunOverviewRow[] = [];
+  const roots = new Set<string>([resolveRunsRoot(args)]);
+  for (const r of allWorktreeRunsRoots(process.cwd())) roots.add(r);
+  for (const root of roots) collectRunsUnder(root, collected);
+
+  // 去重: 同一物理 run 目录可能被多个源重复收集(如 --runs-root 恰是主仓 runs, 又被 git
+  // worktree list 列为主仓)。按实际目录去重(Windows 大小写不敏感)。
+  const seen = new Set<string>();
+  const rows = collected.filter((r) => {
+    const key = process.platform === "win32" ? r.dir.toLowerCase() : r.dir;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
   rows.sort((a, b) => a.run_id.localeCompare(b.run_id));
 
@@ -961,7 +959,7 @@ export function runRuns(args: Args): number {
     return 0;
   }
   if (rows.length === 0) {
-    process.stdout.write("没有 run (主根 runs/ 与 .worktrees/*/runs/ 均为空)。\n");
+    process.stdout.write("没有 run (主根 runs/ 与各 worktree 的 runs/ 均为空)。\n");
     return 0;
   }
   process.stdout.write(`共 ${rows.length} 个 run:\n`);

@@ -107,12 +107,15 @@ test("runs: 总览主根 none run + worktree run", () => {
 
   // 主根 none 模式 run
   makeRun(path.join(repo, "runs"), "20260101-001", { workdir: null, phase: Phase.PLANNING });
-  // worktree 模式 run: .worktrees/<id>/runs/<id>
-  const wtRoot = path.join(repo, ".worktrees", "20260101-002");
-  makeRun(path.join(wtRoot, "runs"), "20260101-002", {
-    workdir: wtRoot,
-    phase: Phase.IMPLEMENTING,
+  // 真 git worktree(runRuns 经 git worktree list 发现; 手建目录不会被列出)
+  const wtParent = makeTmp("wt");
+  const wt = path.join(wtParent, "wt-b");
+  execFileSync("git", ["worktree", "add", "-q", wt, "-b", "b-mix"], {
+    cwd: repo,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
   });
+  makeRun(path.join(wt, "runs"), "20260101-002", { workdir: wt, phase: Phase.IMPLEMENTING });
 
   const args = parseCliArgs(["runs", "--runs-root", path.join(repo, "runs")]);
   const { result, stdout } = withCapturedStreams(() => runRuns(args));

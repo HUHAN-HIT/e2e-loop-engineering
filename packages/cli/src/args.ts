@@ -80,6 +80,8 @@ export function parseCliArgs(tokens: string[]): Args {
     // --- 真实 run 子命令 (M7C) ---
     // --task <id>: collect-outcome 必需, 指定要校验的 task_id
     task: { type: "string" as const },
+    // --- doctor --run <run_id|路径>: 预检某个 run 的产物 (task-plan.yaml 能否解析等) ---
+    run: { type: "string" as const },
   };
 
   const values: Record<string, string | undefined> = {};

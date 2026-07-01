@@ -39,6 +39,7 @@ import {
   type WorkerName,
 } from "../common.js";
 import { findActiveRun } from "../../runs.js";
+import { readTaskPlanDiag } from "../../task_plan.js";
 import {
   computeActualWrites,
   extractPathsFromText,
@@ -263,14 +264,21 @@ function handlePlan(runDir: string): HandleResult {
     };
   }
 
-  const plan = safeReadTaskPlan(runDir);
-  if (plan === null) {
+  // 用诊断版区分 解析失败 / 结构非法, 把 describeYamlError 的行号+冒号提示带进 deny 消息,
+  // 主 agent 据此可精确指挥 plan-agent 修 (自愈); 老版一律压成 null → 只能报"解析失败"无指向。
+  const planRead = readTaskPlanDiag(runDir);
+  if (planRead.status !== "ok") {
+    const detail =
+      planRead.status === "parse_error"
+        ? planRead.message
+        : planRead.status === "invalid"
+          ? `task-plan.yaml 结构非法 (缺 tasks 或字段类型错误; 路径=${artifacts.task_plan})`
+          : `task-plan.yaml 缺失 (路径=${artifacts.task_plan})`;
     return {
-      output: deny(
-        `task-plan.yaml 解析失败; §0.4 artifact-first (路径=${artifacts.task_plan})`,
-      ),
+      output: deny(`plan-agent 产出的 task-plan.yaml 不可用: ${detail}; §0.4 artifact-first`),
     };
   }
+  const plan = planRead.plan;
 
   // hook 设计边界: 这里只校验 artifact 落盘 + plan 可解析 (§0.4 artifact-first)。
   // plan_check 的完整机械检查 (path_overlap / acceptance_refs / risk:high key-diffs 等)

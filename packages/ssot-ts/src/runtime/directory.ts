@@ -30,7 +30,8 @@ import { parseTaskPlan } from "../schema/task_plan.js";
 import { parseTaskDetail } from "../schema/task_detail.js";
 import type { TaskPlan } from "../schema/task_plan.js";
 import type { TaskDetail } from "../schema/task_detail.js";
-import { dumpTaskPlanYaml, loadTaskPlanYaml, loadTaskDetailYaml } from "./yaml_io.js";
+import { parseYamlSafe } from "@e2e-loop/shared";
+import { dumpTaskPlanYaml } from "./yaml_io.js";
 
 /** design §6 子目录清单 (tasks 下每个 task 还会有自己的 <id>/ 子目录)。 */
 export const RUN_SUBDIRS: readonly string[] = [
@@ -206,22 +207,32 @@ export function writeTaskPlan(planPath: string, plan: TaskPlan): void {
   }
 }
 
-/** 从 planning/task-plan.yaml 读 + parse。文件不存在 → throw。 */
+/**
+ * 从 planning/task-plan.yaml 读 + parse。文件不存在 → throw。
+ *
+ * YAML 语法错误 (如 plan-agent 手写 scenario 值含未引用冒号) → 抛带文件/行号/冒号提示的
+ * 可读错误 (parseYamlSafe/describeYamlError), 而非裸 js-yaml 堆栈 —— 否则每个重建
+ * Coordinator 的 CLI 子命令都会在构造函数崩且报错不可读。
+ */
 export function readTaskPlan(planPath: string): TaskPlan {
   if (!fs.existsSync(planPath)) {
     throw new Error(`task-plan.yaml 不存在: ${planPath}`);
   }
-  const data = loadTaskPlanYaml(fs.readFileSync(planPath, "utf-8"));
-  return parseTaskPlan(data);
+  const text = fs.readFileSync(planPath, "utf-8");
+  const res = parseYamlSafe(planPath, text);
+  if (!res.ok) throw new Error(res.message);
+  return parseTaskPlan(res.data);
 }
 
-/** 从 planning/task-details/<id>.yaml 读 + parse。文件不存在 → throw。 */
+/** 从 planning/task-details/<id>.yaml 读 + parse。文件不存在 → throw; YAML 语法错 → 可读诊断。 */
 export function readTaskDetail(detailPath: string): TaskDetail {
   if (!fs.existsSync(detailPath)) {
     throw new Error(`task detail 不存在: ${detailPath}`);
   }
-  const data = loadTaskDetailYaml(fs.readFileSync(detailPath, "utf-8"));
-  return parseTaskDetail(data);
+  const text = fs.readFileSync(detailPath, "utf-8");
+  const res = parseYamlSafe(detailPath, text);
+  if (!res.ok) throw new Error(res.message);
+  return parseTaskDetail(res.data);
 }
 
 /** 建 tasks/<id>/ 与 logs/ 子目录。已存在不报错 (幂等)。 */

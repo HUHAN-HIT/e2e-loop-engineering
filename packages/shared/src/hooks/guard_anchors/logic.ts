@@ -27,9 +27,9 @@ import {
   findActiveTask,
   passSilent,
   safeReadRunState,
-  safeReadTaskPlan,
 } from "../common.js";
 import { findActiveRun } from "../../runs.js";
+import { readTaskPlanDiag } from "../../task_plan.js";
 import type { HumanPending } from "../../run_state.js";
 
 /**
@@ -185,10 +185,19 @@ function checkImplementingPhase(
   runDir: string,
 ): PhaseCheck {
   const state = safeReadRunState({ cwd: "", runDir });
-  const plan = safeReadTaskPlan(runDir);
-  if (plan === null) {
-    return { ok: false, detail: "IMPLEMENTING 但 task-plan.yaml 缺失" };
+  // 区分 缺失 / 解析失败 / 结构非法 —— 老版把三者都报成"缺失", plan-agent 产出的坏 YAML
+  // 会被误导。解析失败时把行号+冒号提示带进 Stop 门禁 detail, 让主 agent 知道该修哪。
+  const planRead = readTaskPlanDiag(runDir);
+  if (planRead.status !== "ok") {
+    const detail =
+      planRead.status === "parse_error"
+        ? `IMPLEMENTING 但 task-plan.yaml 解析失败: ${planRead.message}`
+        : planRead.status === "invalid"
+          ? "IMPLEMENTING 但 task-plan.yaml 结构非法 (缺 tasks 或字段类型错误)"
+          : "IMPLEMENTING 但 task-plan.yaml 缺失";
+    return { ok: false, detail };
   }
+  const plan = planRead.plan;
   const task = findActiveTask(plan, state);
   if (task === null) {
     // 无 status=running 的活跃 task: 不能一律放行, 否则派发前/任务间空档想结束

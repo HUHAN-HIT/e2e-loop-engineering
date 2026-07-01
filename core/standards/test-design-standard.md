@@ -80,6 +80,33 @@ cases:
 
 ---
 
+## 4.5 YAML 书写红线: scenario/title 含冒号必须加引号 `[S][M][C]`
+
+`task-plan.yaml` 是 YAML 文件。中文 `scenario` / `title` 值里极易出现 `: `(冒号+空格) 这类 YAML 元字符——**未加引号会让整份文件解析失败**, coordinator 在 `yaml.load` 阶段直接崩, 报错是不可读的堆栈, 整个 run 卡死 (每个重建 coordinator 的 CLI 子命令都崩)。
+
+规则: 凡 `scenario` / `title` 的值含以下任一, **必须整体用双引号包裹**:
+- `: `(冒号+空格)——最常见, 如 `负向: xxx`、`E2E: yyy`
+- 行内 `#`; 或值以 `[ { * & ? - > | @ %` 或引号开头
+
+✓ 正例:
+
+```yaml
+- id: T03-CASE-002
+  scenario: "负向: 尝试将 DONE 推进回 RUNNING, 状态机拒绝并保留原状态"
+  checks:
+    - "transition_rejected == true"
+```
+
+✗ 反例 (整份 yaml 报 `bad indentation of a mapping entry`, 全 run 卡死):
+
+```yaml
+  scenario: 负向: 尝试将 DONE 推进回 RUNNING   # 冒号未加引号 → YAML 误判为嵌套映射
+```
+
+**保险做法: 所有 `scenario` / `title` 一律加双引号**, 不逐条判断是否"恰好含元字符"。coordinator 端虽有 `describeYamlError` 会指出出错行号 (见 `@e2e-loop/shared` 的 `yaml_diag`), 但预防永远优于事后诊断。
+
+---
+
 ## 5. Worked example
 
 **AC-002:** `提交错误验证码时, 校验接口返回 {ok:false, reason:"captcha_invalid"}`。

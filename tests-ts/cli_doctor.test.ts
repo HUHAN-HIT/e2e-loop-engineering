@@ -216,3 +216,118 @@ test("CLI doctor: 未知态 (既非源码仓库也无 .claude 资产) → blocke
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// run 产物预检模式 (doctor --run <run_id>): 核心是 task-plan.yaml 能否解析。
+// 复刻真实故障: plan-agent 手写 scenario 值含未引用冒号 → 整份 YAML 非法。
+// ---------------------------------------------------------------------------
+
+/** 造一个含 runs/<id> 的临时项目; planText 为 undefined 则不写 task-plan.yaml。 */
+function makeRunProject(runId: string, planText?: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-doctor-run-"));
+  const runDir = path.join(dir, "runs", runId);
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "run-state.json"), "{}\n");
+  if (planText !== undefined) {
+    const planningDir = path.join(runDir, "planning");
+    fs.mkdirSync(planningDir, { recursive: true });
+    fs.writeFileSync(path.join(planningDir, "task-plan.yaml"), planText, "utf-8");
+  }
+  return dir;
+}
+
+const RUN_BAD_PLAN = [
+  "complexity: complex",
+  "tasks:",
+  "  - id: T01",
+  '    title: "x"',
+  "    allowed_write_paths: [a]",
+  "    acceptance_refs: [AC-001]",
+  "    tests:",
+  "      - id: T01-CASE-001",
+  "        scenario: 负向: 冒号未加引号会炸",
+  "        checks: []",
+].join("\n");
+
+const RUN_GOOD_PLAN = [
+  "complexity: simple",
+  "tasks:",
+  "  - id: T01",
+  '    title: "做点事"',
+  "    allowed_write_paths: [a]",
+  "    acceptance_refs: [AC-001]",
+].join("\n");
+
+test("CLI doctor --run: task-plan.yaml 含未引用冒号 → task_plan_parses fail 带行号+冒号提示", () => {
+  const dir = makeRunProject("20260701-001", RUN_BAD_PLAN);
+  try {
+    const r = runDoctor(["--json", "--project-dir", dir, "--run", "20260701-001"]);
+    expect(r.stderr).toBe("");
+    const report = JSON.parse(r.stdout) as {
+      ok: boolean;
+      mode: string;
+      checks: Record<string, { ok: boolean; detail?: string }>;
+    };
+    expect(report.mode).toBe("run");
+    expect(report.checks.run_dir_found.ok).toBe(true);
+    expect(report.checks.task_plan_parses.ok).toBe(false);
+    expect(report.checks.task_plan_parses.detail).toContain("未加引号的冒号");
+    expect(report.checks.task_plan_parses.detail).toContain("第");
+    expect(report.ok).toBe(false);
+    expect(r.status).toBe(1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI doctor --run: 合法 task-plan.yaml → 全绿 (mode=run)", () => {
+  const dir = makeRunProject("20260701-002", RUN_GOOD_PLAN);
+  try {
+    const r = runDoctor(["--json", "--project-dir", dir, "--run", "20260701-002"]);
+    const report = JSON.parse(r.stdout) as {
+      ok: boolean;
+      mode: string;
+      checks: Record<string, { ok: boolean; detail?: string }>;
+    };
+    expect(report.mode).toBe("run");
+    expect(report.checks.task_plan_parses.ok).toBe(true);
+    expect(report.ok).toBe(true);
+    expect(r.status).toBe(0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI doctor --run: task-plan.yaml 尚未产出 → 软信号不阻断", () => {
+  const dir = makeRunProject("20260701-003"); // 只有 run-state.json
+  try {
+    const r = runDoctor(["--json", "--project-dir", dir, "--run", "20260701-003"]);
+    const report = JSON.parse(r.stdout) as {
+      ok: boolean;
+      checks: Record<string, { ok: boolean; detail?: string }>;
+    };
+    expect(report.checks.task_plan_parses.ok).toBe(true);
+    expect(report.checks.task_plan_parses.detail).toContain("尚未产出");
+    expect(report.ok).toBe(true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI doctor --run: run 目录不存在 → run_dir_found fail", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-doctor-run-none-"));
+  try {
+    const r = runDoctor(["--json", "--project-dir", dir, "--run", "nope-999"]);
+    const report = JSON.parse(r.stdout) as {
+      ok: boolean;
+      mode: string;
+      checks: Record<string, { ok: boolean; detail?: string }>;
+    };
+    expect(report.mode).toBe("run");
+    expect(report.checks.run_dir_found.ok).toBe(false);
+    expect(report.ok).toBe(false);
+    expect(r.status).toBe(1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

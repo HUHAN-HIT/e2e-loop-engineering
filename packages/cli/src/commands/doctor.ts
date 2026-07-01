@@ -19,6 +19,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { parseYamlSafe } from "@e2e-loop/shared";
 import type { Args } from "../args.js";
 import { resolveProjectDir } from "../util.js";
 
@@ -27,7 +28,7 @@ interface CheckResult {
   detail: string;
 }
 
-type DoctorMode = "impl-repo" | "target-project" | "unknown";
+type DoctorMode = "impl-repo" | "target-project" | "unknown" | "run";
 
 interface DoctorReport {
   ok: boolean;
@@ -399,8 +400,89 @@ function buildUnknownReport(projectDir: string): DoctorReport {
   };
 }
 
+// ---------------------------------------------------------------------------
+// run 产物预检模式 (doctor --run <run_id|路径>)
+// ---------------------------------------------------------------------------
+
+/**
+ * 把 --run 的实参解析为 run 目录。
+ *
+ * 依次尝试: (1) <projectDir>/runs/<arg> (常规 run_id); (2) 把 arg 当直接路径 (绝对/相对);
+ * 取第一个真实存在的目录。都不存在 → 返回首选候选 (供报告展示"未找到")。
+ */
+function resolveRunDir(projectDir: string, runArg: string): string {
+  const c1 = path.join(projectDir, "runs", runArg);
+  if (existsDir(c1)) return c1;
+  const c2 = path.isAbsolute(runArg) ? runArg : path.resolve(projectDir, runArg);
+  if (existsDir(c2)) return c2;
+  return c1;
+}
+
+/**
+ * 预检某个 run 的产物 —— 核心是 task-plan.yaml 能否解析。
+ *
+ * 动机: plan-agent 手写的 task-plan.yaml 若含未引用冒号会让 Coordinator 构造函数崩,
+ * 报错是不可读的 js-yaml 堆栈。本模式在跑任何真实子命令前, 用 parseYamlSafe 给出带
+ * 文件/行号/冒号提示的诊断, 把"运行时崩溃"提前成"可读 preflight"。
+ */
+function buildRunReport(projectDir: string, runArg: string): DoctorReport {
+  const runDir = resolveRunDir(projectDir, runArg);
+  const checks: Record<string, CheckResult> = {};
+
+  const found = existsDir(runDir);
+  checks.run_dir_found = {
+    ok: found,
+    detail: found ? runDir : `run 目录未找到: ${runDir} (也试过把 '${runArg}' 当直接路径)`,
+  };
+
+  if (found) {
+    // run-state.json: 软信号 (可能尚未初始化)
+    const statePath = path.join(runDir, "run-state.json");
+    checks.run_state_present = {
+      ok: true,
+      detail: existsFile(statePath) ? "run-state.json 存在" : "run-state.json 缺失 (尚未 init?)",
+    };
+
+    // task-plan.yaml: 核心检查。缺失=软信号 (计划阶段前正常); 存在但解析失败=硬失败。
+    const planPath = path.join(runDir, "planning", "task-plan.yaml");
+    if (!existsFile(planPath)) {
+      checks.task_plan_parses = {
+        ok: true,
+        detail: "task-plan.yaml 尚未产出 (PLANNING 之前正常, 不阻断)",
+      };
+    } else {
+      const res = parseYamlSafe(rel(projectDir, planPath), fs.readFileSync(planPath, "utf-8"));
+      checks.task_plan_parses = res.ok
+        ? { ok: true, detail: "task-plan.yaml 解析通过" }
+        : { ok: false, detail: res.message };
+    }
+
+    // design.md: 软信号
+    const designPath = path.join(runDir, "planning", "design.md");
+    checks.design_present = {
+      ok: true,
+      detail: existsFile(designPath) ? "design.md 存在" : "design.md 缺失 (PLANNING 之前正常)",
+    };
+  }
+
+  const ok = Object.values(checks).every((c) => c.ok);
+  return {
+    ok,
+    mode: "run",
+    cwd: process.cwd(),
+    repo_root: runDir,
+    checks,
+    nearby_docs: [],
+  };
+}
+
 function buildReport(args: Args): DoctorReport {
   const projectDir = resolveProjectDir(args.values["project-dir"]);
+
+  // --run <run_id|路径>: 正交于三态判定, 专做 run 产物预检 (task-plan.yaml 能否解析等)。
+  const runArg = args.values.run;
+  if (runArg) return buildRunReport(projectDir, runArg);
+
   const repoRoot = findRepoRoot(projectDir);
   const docArg = args.values.doc;
 

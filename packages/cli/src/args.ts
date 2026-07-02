@@ -85,6 +85,9 @@ export function parseCliArgs(tokens: string[]): Args {
     task: { type: "string" as const },
     // --- doctor --run <run_id|路径>: 预检某个 run 的产物 (task-plan.yaml 能否解析等) ---
     run: { type: "string" as const },
+    // --- clarification 子命令 ---
+    // --answers <json-file>: answer-clarification 必需, 指向用户答案 JSON 文件
+    answers: { type: "string" as const },
   };
 
   const values: Record<string, string | undefined> = {};

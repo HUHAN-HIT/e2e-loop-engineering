@@ -28,6 +28,8 @@ export function printHelp(stream: NodeJS.WriteStream = process.stdout): void {
   signoff-wrap-up  条件收口签收: 接受 / 拒绝异常或高风险收口
   abort            任意 phase → ABORTED (必须给 --reason)
   amend            处理 plan-amendment (回滚触及 AC 的 task, 回 PLANNING)
+  submit-clarification   读取 clarification/questions.json, set clarification 锚点
+  answer-clarification    读取答案文件, 清锚点 + 推进 PLANNING
 
 真实 run 命令 (主 agent 当 coordinator, 触发 Task 工具派 implementation-worker):
   dispatch         IMPLEMENTING 阶段选 ready task, 标 running, 输出 packets JSON
@@ -77,6 +79,8 @@ dry-run 命令选项:
   signoff-wrap-up   <run_id> [--reject]
   abort       <run_id> --reason <text>
   amend       <run_id> --reason <text> --ac <AC_ID> [--ac <AC_ID> ...]
+  submit-clarification  <run_id>
+  answer-clarification   <run_id> --answers <json-file>
   (以上命令均接受 --runs-root <dir>)
 
 真实 run 命令选项:
@@ -106,6 +110,7 @@ worktree 续跑 / 总览选项:
   e2e-loop plan 20260628-001 --design ./design.md --task-plan ./task-plan.yaml
   e2e-loop signoff-plan 20260628-001
   e2e-loop run 20260628-001
+  e2e-loop submit-clarification 20260630-001
   e2e-loop signoff-wrap-up 20260628-001
 
 退出码:

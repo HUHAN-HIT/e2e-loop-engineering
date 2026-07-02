@@ -29,10 +29,10 @@ export type TrustMode = "collaborative" | "unattended";
 
 /**
  * 人介入时机 (design §1, §6); null 表示无需人介入。
- * 方法论演进 (2026-06-28): 删除 `clarification` 锚点——澄清不再单独停人,
- * 带默认直进 PLANNING, 问题在 plan 签署时一并呈现。
+ * 2026-06-30: 回退为 `clarification` 锚点——阻塞性澄清问题独立停人问用户,
+ * 仅 CLARIFYING 阶段合法 (见 ssot HumanPendingSchema)。
  */
-export type HumanPending = "plan_signoff" | "wrap_up_signoff" | null;
+export type HumanPending = "clarification" | "plan_signoff" | "wrap_up_signoff" | null;
 
 /** 宿主能力探测结果 (design §3.4) */
 export interface RunCapabilities {

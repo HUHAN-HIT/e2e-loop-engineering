@@ -7,6 +7,7 @@
  */
 export * from "./run_state.js";
 export * from "./task_plan.js";
+export * from "./task_detail.js";
 export * from "./artifacts.js";
 export * from "./clarification.js";
 export * from "./service_contracts.js";

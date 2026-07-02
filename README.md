@@ -8,30 +8,55 @@
 
 ## 安装 (npm-first)
 
-本仓库是 npm workspace monorepo。从源码安装:
+发布包名是 `e2e-loop`, 命令名也是 `e2e-loop`。
+
+全局安装后可在任意测试工程中直接安装 Loop Engineering 资产:
 
 ```bash
-npm install        # 安装 workspace 依赖
-npm run build      # 构建 adapter-cc hooks (.mjs) + adapter-oc plugin (.js) + CLI bundle
+npm install -g e2e-loop
+e2e-loop install --host both --project-dir <path>
 ```
 
-用 CLI 把资产落到目标项目 (`<cc|oc|both>`: cc = Claude Code, oc = OpenCode, both = 双装):
+如果只想安装到当前测试工程, 使用本地 dev dependency + `npx`:
 
 ```bash
-node packages/cli/dist/index.js install --host cc   --project-dir <path>   # 仅 Claude Code
-node packages/cli/dist/index.js install --host oc   --project-dir <path>   # 仅 OpenCode
-node packages/cli/dist/index.js install --host both --project-dir <path>   # 双装 (共享 .claude/skills/)
+npm install -D e2e-loop
+npx e2e-loop install --host both
+```
+
+`<cc|oc|both>`: `cc` = Claude Code, `oc` = OpenCode, `both` = 双装。
+
+```bash
+e2e-loop install --host cc   --project-dir <path>   # 仅 Claude Code
+e2e-loop install --host oc   --project-dir <path>   # 仅 OpenCode
+e2e-loop install --host both --project-dir <path>   # 双装 (共享 .claude/skills/)
 ```
 
 - `cc` 落 `.claude/` (settings.json + 4 个 hook .mjs + skill + 4 个 subagent)。
 - `oc` 落 `.claude/skills/loop-engineering/` (OpenCode 原生读 Claude 兼容路径) + `.opencode/` (agents + plugin + opencode.json)。
 - `both` 先装 CC 再装 OC, 两者共享同一份 `.claude/skills/SKILL.md`, 不冲突。
 
-发布后将简化为一行全局安装:
+从源码开发本仓库:
 
 ```bash
-npm install -g @e2e-loop/cli
-e2e-loop install --host both --project-dir <path>
+npm install        # 安装 workspace 依赖
+npm run build      # 构建 adapter-cc hooks (.mjs) + adapter-oc plugin (.js) + CLI bundle
+node packages/cli/dist/index.js install --host both --project-dir <path>
+```
+
+源码 checkout 的 CLI 入口是 TypeScript monorepo 形态, 不是旧的 Python
+`loop_engineering/cli.py`:
+
+- root shim: `bin/e2e-loop`
+- package bin: `packages/cli/package.json` -> `dist/index.js`
+- source entry: `packages/cli/src/index.ts`
+- built entry: `packages/cli/dist/index.js`
+
+启动 run 前可以先做机械自检:
+
+```bash
+npm run doctor -- --doc docs/superpowers/specs/2026-06-30-task-plan-detail-split-design.md
+npm run cli -- help
 ```
 
 ---
@@ -45,6 +70,7 @@ e2e-loop install --host both --project-dir <path>
 | `install`   | 安装 Claude Code / OpenCode 资产到目标项目 (`--host`, `--project-dir`, `--force`, `--dry-run`) |
 | `uninstall` | 卸载已安装资产 (只删本工具装的) |
 | `list`      | 列出目标项目下本工具管理的资产 |
+| `doctor`    | 启动前自检 CLI 入口、构建产物与可选设计文档路径 |
 
 算法 dry-run (本地骨架验证, worker 用 echo 占位):
 
@@ -60,7 +86,7 @@ e2e-loop install --host both --project-dir <path>
 | `abort`           | 任意 phase → ABORTED (必须给 `--reason`) |
 | `amend`           | 处理 plan-amendment (回滚触及 AC 的 task, 回 PLANNING) |
 
-完整选项见 `node packages/cli/dist/index.js help`。
+完整选项见 `e2e-loop help` 或源码开发时的 `node packages/cli/dist/index.js help`。
 
 ---
 
@@ -83,7 +109,7 @@ CLI 缺省同样是 `--worktree-mode auto`。`auto` 会在当前目录已是 lin
 ```
 core/                宿主无关 SSOT (coordinator.md 提示词 + subagents/ + standards/ + manifest.json)
 packages/            npm workspace 包
-  ├── cli/           @e2e-loop/cli         — e2e-loop 命令 (install/uninstall/list + dry-run + dispatch)
+  ├── cli/           e2e-loop              — e2e-loop 命令 (install/uninstall/list + dry-run + dispatch)
   ├── adapter-cc/    @e2e-loop/adapter-claude-code — CC adapter (4 hook 编译为 .mjs)
   ├── adapter-oc/    @e2e-loop/adapter-opencode    — OC adapter (4 hook 等价 plugin bundle)
   ├── shared/        @e2e-loop/shared      — 跨 adapter 共享层 (hook logic / path_match / actual_writes)
@@ -130,7 +156,7 @@ npx tsc --noEmit              # 类型检查
 | 阶段 | 目标 | 状态 |
 | --- | --- | --- |
 | P0 | Monorepo 重构: 拆 `core/`, 建 `packages/` 与 `adapters/` 骨架 | ✅ |
-| P1 | npm workspace 通; `@e2e-loop/{cli,adapter-claude-code,shared}` 全 TS; 4 hook TS 重写 | ✅ |
+| P1 | npm workspace 通; `e2e-loop` CLI + `@e2e-loop/{adapter-claude-code,shared}` 全 TS; 4 hook TS 重写 | ✅ |
 | P2 | `@e2e-loop/adapter-opencode` 基础: SKILL.md + subagent 落 OpenCode; CLI 接 host=oc/both | ✅ |
 | P3 | OpenCode plugin: 4 hook 在 OC plugin 体系等价实现 (复用 shared logic) | ✅ |
 | P4 | Python SSOT → TS 迁移 M1-M6 (schema → … → trust_mode), 全落 `packages/ssot-ts` (zod) | ✅ |

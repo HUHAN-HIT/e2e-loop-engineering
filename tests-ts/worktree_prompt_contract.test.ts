@@ -37,3 +37,12 @@ test("CLI init defaults to worktree auto when coordinator omits worktree-mode", 
   expect(dryrun).toContain('const mode = raw ?? "auto";');
   expect(dryrun).not.toContain('const mode = raw ?? "none";');
 });
+
+test("coordinator §0 provides EnterWorktree same-session path with capability fallback", () => {
+  const doc = read("core/coordinator.md");
+  // 首选: EnterWorktree 同会话切进 + none 模式
+  expect(doc).toContain("EnterWorktree");
+  expect(doc).toContain("--worktree-mode none");
+  // 降级: 无 EnterWorktree 时保留 auto + 重开
+  expect(doc).toContain("--worktree-mode auto");
+});

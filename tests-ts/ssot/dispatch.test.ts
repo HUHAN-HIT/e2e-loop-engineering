@@ -71,6 +71,34 @@ test("[py: build_packet] 依赖 task 的 summary.md 进 dependency_artifacts; co
   expect(packet.workdir).toBe("/code");
 });
 
+test("[detail] buildPacket 将当前 task 的 detail_ref 放到 context_paths 第一位并暴露 task_detail_path", () => {
+  const plan = parseTaskPlan({
+    complexity: "complex",
+    tasks: [
+      {
+        id: "T01",
+        title: "detail task",
+        detail_ref: "planning/task-details/T01.yaml",
+        allowed_write_paths: ["src/auth/**"],
+        acceptance_refs: ["AC-001"],
+        tests: [{ id: "T01-CASE-001", scenario: "happy", checks: ["passed == true"] }],
+      },
+    ],
+  });
+  const packet = buildPacket(plan.tasks[0]!, plan, "/runs/r1", {
+    designMd: "/runs/r1/planning/design.md",
+    taskPlanYaml: "/runs/r1/planning/task-plan.yaml",
+    workdir: "/code",
+  });
+  expect(packet.context_paths).toEqual([
+    "/runs/r1/planning/task-details/T01.yaml",
+    "/runs/r1/planning/design.md",
+    "/runs/r1/planning/task-plan.yaml",
+  ]);
+  expect(packet.task_detail_path).toBe("/runs/r1/planning/task-details/T01.yaml");
+  expect(packet.task_detail_required).toBe(false);
+});
+
 test("[py: build_packet] 无依赖 task → dependency_artifacts 为空", () => {
   const plan = plan2();
   const t01 = plan.tasks.find((t) => t.id === "T01")!;

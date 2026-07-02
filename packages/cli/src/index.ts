@@ -6,6 +6,7 @@
  *   e2e-loop install    --host <cc|oc|both> --project-dir <path> [--force] [--dry-run]
  *   e2e-loop uninstall  --host <cc|oc|both> --project-dir <path>
  *   e2e-loop list                           --project-dir <path>
+ *   e2e-loop doctor                          [--doc <path>] [--json]
  *   e2e-loop help | --help | -h | (无参数)
  *
  * 设计要点:
@@ -21,6 +22,7 @@ import { runInstall } from "./commands/install.js";
 import { runUninstall } from "./commands/uninstall.js";
 import { runList } from "./commands/list.js";
 import { runHook } from "./commands/hook.js";
+import { runDoctor } from "./commands/doctor.js";
 import {
   runInit,
   runStatus,
@@ -33,6 +35,8 @@ import {
   runAmend,
   runDispatch,
   runCollectOutcome,
+  runResume,
+  runRuns,
 } from "./commands/dryrun.js";
 import {
   runSubmitClarification,
@@ -55,6 +59,7 @@ function dryRunGuard(fn: () => number): number {
     return 1;
   }
 }
+
 
 async function main(): Promise<number> {
   const tokens = process.argv.slice(2);
@@ -87,6 +92,7 @@ async function main(): Promise<number> {
     return 0;
   }
 
+
   switch (args.command) {
     // --- 安装类 (P1~P3) ---
     case "install":
@@ -97,6 +103,8 @@ async function main(): Promise<number> {
       return await runList(args);
     case "hook":
       return await runHook(args);
+    case "doctor":
+      return await runDoctor(args);
     // --- 算法 dry-run 类 (P5-M7B, 同步, 对齐 Python cli.py) ---
     // 这些命令调 Coordinator, 可能抛运行期错误 (如 run-state 缺失、收口 gate 未过的签收拒绝)。
     // 统一在 dryRunGuard 内捕获, 友好 stderr + exit 1, 不抛裸 stack。
@@ -128,6 +136,11 @@ async function main(): Promise<number> {
       return dryRunGuard(() => runSubmitClarification(args));
     case "answer-clarification":
       return dryRunGuard(() => runAnswerClarification(args));
+    // --- worktree bootstrap 续跑 / 并行总览 ---
+    case "resume":
+      return dryRunGuard(() => runResume(args));
+    case "runs":
+      return dryRunGuard(() => runRuns(args));
     case undefined:
       process.stderr.write("错误: 缺少子命令\n\n");
       printHelp(process.stderr);

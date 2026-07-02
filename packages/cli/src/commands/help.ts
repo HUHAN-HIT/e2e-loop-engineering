@@ -15,6 +15,7 @@ export function printHelp(stream: NodeJS.WriteStream = process.stdout): void {
   uninstall     卸载已安装的资产 (只删本工具装的)
   list          列出目标项目 .claude/ 下本工具管理的资产
   hook <hook-name>  执行 Claude Code hook stdin/stdout 入口
+  doctor        启动前自检 CLI 入口、构建产物与可选设计文档路径
   help          显示本帮助
 
 算法 dry-run 命令 (本地骨架验证, worker 用 echo 占位):
@@ -33,6 +34,10 @@ export function printHelp(stream: NodeJS.WriteStream = process.stdout): void {
 真实 run 命令 (主 agent 当 coordinator, 触发 Task 工具派 implementation-worker):
   dispatch         IMPLEMENTING 阶段选 ready task, 标 running, 输出 packets JSON
   collect-outcome  收回单个 task 的 outcome, 校验, 推进状态 / 留 running 给 fix
+
+worktree bootstrap 续跑 / 并行总览:
+  resume <run_id>  弹新终端在该 run 的 worktree 内起会话续跑到 plan 签署 (无法弹出则打印手动引导)
+  runs             总览主根 + 所有 worktree 的 run (phase / human_pending / workdir); 支持 --json
 
 通用选项:
   --help, -h            显示本帮助
@@ -56,6 +61,11 @@ uninstall 选项:
 
 list 选项:
   --project-dir <path>  目标项目根目录 (缺省: 当前工作目录)
+
+doctor 选项:
+  --project-dir <path>  要诊断的 checkout 根或子目录 (缺省: 当前工作目录)
+  --doc <path>          额外检查设计/需求文档是否存在; 缺失时返回 1
+  --json                输出机器可读 JSON
 
 dry-run 命令选项:
   init        <requirement.md> [--complexity <auto|simple|medium|complex>]
@@ -81,11 +91,18 @@ dry-run 命令选项:
                                    all_complete, attempt, max_retries_exceeded, ...}
   (以上命令均接受 --runs-root <dir>)
 
+worktree 续跑 / 总览选项:
+  resume      <run_id> [--runs-root <dir>]
+              → worktree 模式 run 弹新终端续跑; none 模式提示就地续跑; 弹不出则打印手动引导
+  runs        [--runs-root <dir>] [--worktree-root <dir>] [--json]
+              → 表格列出所有 run 的 phase / human_pending / complexity / workdir
+
 示例:
   e2e-loop install --host cc --project-dir ./my-project
   e2e-loop install --host cc --project-dir ./my-project --force
   e2e-loop install --host cc --dry-run
   e2e-loop list --project-dir ./my-project
+  e2e-loop doctor --doc docs/superpowers/specs/example.md
   e2e-loop install --host cc --hook-mode cli --cli-command e2e-loop
   e2e-loop hook guard-paths
   e2e-loop uninstall --host cc --project-dir ./my-project

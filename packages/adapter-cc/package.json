@@ -1,6 +1,6 @@
 {
   "name": "@e2e-loop/adapter-claude-code",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -28,7 +28,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@e2e-loop/shared": "^1.0.0"
+    "@e2e-loop/shared": "^1.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

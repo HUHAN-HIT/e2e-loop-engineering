@@ -79,6 +79,8 @@ export const TaskSchema = z.object({
   tests: z.array(TestCaseSchema).default([]),
   status: TaskStatusSchema.default("pending"),
   attempt: z.number().int().default(0),
+  /** 当前 task 的长篇指导文件路径, 相对 run root。 */
+  detail_ref: z.string().nullish().default(null),
   // 多服务可选 (design §11.1)
   service: z.string().nullish().default(null),
   provides_contracts: z.array(z.string()).default([]),

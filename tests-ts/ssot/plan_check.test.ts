@@ -20,6 +20,7 @@ import type { ServiceContracts } from "../../packages/ssot-ts/src/schema/service
 import { Complexity } from "../../packages/ssot-ts/src/schema/run_state.js";
 import { TaskSchema, TaskPlanSchema } from "../../packages/ssot-ts/src/schema/task_plan.js";
 import type { Task, TaskPlan } from "../../packages/ssot-ts/src/schema/task_plan.js";
+import { parseTaskDetail } from "../../packages/ssot-ts/src/schema/task_detail.js";
 
 function mkTask(
   tid: string,
@@ -32,6 +33,8 @@ function mkTask(
     provides?: string[];
     consumes?: string[];
     exclusive?: boolean;
+    risk?: "normal" | "high";
+    detailRef?: string | null;
   },
 ): Task {
   const tests = opts?.tests ?? 1;
@@ -50,6 +53,8 @@ function mkTask(
     provides_contracts: opts?.provides ?? [],
     consumes_contracts: opts?.consumes ?? [],
     exclusive: opts?.exclusive ?? false,
+    risk: opts?.risk ?? "normal",
+    detail_ref: opts?.detailRef ?? null,
   });
 }
 
@@ -219,6 +224,63 @@ describe("TestContractsCheck", () => {
 // ---------------------------------------------------------------------------
 // 模块级用例
 // ---------------------------------------------------------------------------
+
+describe("TestTaskDetails", () => {
+  test("complex high-risk task 缺必需 detail_ref → fail", () => {
+    const plan = mkPlan([mkTask("T01", { risk: "high" })], Complexity.complex);
+    const result = checkPlan(plan, { taskDetails: {} });
+    const items = result.items.filter((i) => i.check === "task_detail_exists");
+    expect(items.some((i) => !i.passed)).toBe(true);
+    expect(items[0]!.detail).toContain("T01");
+  });
+
+  test("detail 引用当前 task 未声明的 AC 或 case → fail", () => {
+    const plan = mkPlan([
+      mkTask("T01", {
+        detailRef: "planning/task-details/T01.yaml",
+        refs: ["AC-001"],
+        tests: 1,
+      }),
+    ], Complexity.complex);
+    const detail = parseTaskDetail({
+      task_id: "T01",
+      business_logic_steps: ["实现主流程"],
+      acceptance_context: [{ ref: "AC-404" }],
+      verification_map: [{ acceptance_ref: "AC-001", planned_cases: ["missing-case"] }],
+    });
+    const result = checkPlan(plan, {
+      taskDetails: { "planning/task-details/T01.yaml": detail },
+    });
+    expect(result.items.some((i) => i.check === "task_detail_acceptance_refs_match" && !i.passed)).toBe(true);
+    expect(result.items.some((i) => i.check === "task_detail_planned_cases_match" && !i.passed)).toBe(true);
+  });
+
+  test("有效 detail 引用当前 task AC 与 planned case → pass", () => {
+    const task = TaskSchema.parse({
+      id: "T01",
+      title: "T01",
+      detail_ref: "planning/task-details/T01.yaml",
+      allowed_write_paths: ["src/T01/**"],
+      acceptance_refs: ["AC-001"],
+      tests: [{ id: "T01-CASE-001", scenario: "s", checks: ["passed == true"] }],
+      risk: "high",
+    });
+    const plan = mkPlan([task], Complexity.complex);
+    const detail = parseTaskDetail({
+      task_id: "T01",
+      business_logic_steps: ["实现主流程"],
+      acceptance_context: [{ ref: "AC-001" }],
+      verification_map: [{ acceptance_ref: "AC-001", planned_cases: ["T01-CASE-001"] }],
+      review_focus: ["检查边界"],
+    });
+    const result = checkPlan(plan, {
+      taskDetails: { "planning/task-details/T01.yaml": detail },
+    });
+    const detailItems = result.items.filter((i) => i.check.startsWith("task_detail_"));
+    expect(detailItems.length).toBeGreaterThan(0);
+    expect(detailItems.every((i) => i.passed)).toBe(true);
+  });
+});
 
 test("[py: test_default_path_overlap_detects_conflict] 缺省 pathOverlapFn 检出冲突", () => {
   const plan = mkPlan([

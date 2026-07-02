@@ -28,6 +28,7 @@ import {
   safeReadRunState,
 } from "../common.js";
 import { findActiveRun } from "../../runs.js";
+import { readWorktreeMarker } from "../../worktree_marker.js";
 
 /** 探测到的宿主能力 (Python `RunCapabilities` 等价)。 */
 export interface Capabilities {
@@ -128,15 +129,28 @@ export async function handle(input: HookInput): Promise<HookOutput> {
       });
     }
 
+    // 改动② (worktree-only 一致性正向自检): 用 cwd 的根 marker 校验绑定的 run 与当前
+    // active run 是否一致。不一致 → 注入 worktree 错位 warning (可能是 worktree 复用/状态错位)。
+    // marker 一致 或 无 marker → markerWarning 为 null, 维持现有行为不变。
+    let markerWarning: string | null = null;
+    const marker = readWorktreeMarker(input.cwd);
+    if (marker !== null && marker.run_id !== active.runId) {
+      markerWarning =
+        `worktree marker 绑定的 run (${marker.run_id}) 与当前 active run (${active.runId}) 不一致; ` +
+        "可能是 worktree 复用或状态错位, 请确认当前会话是否在正确的 run worktree 内。";
+    }
+
     // 3. 读 run-state; 缺失/不可解析 → 仅提示
     const state = safeReadRunState({ ...input, runDir: active.runDir });
     if (state === null) {
-      return injectContext({
+      const payload: Record<string, unknown> = {
         loop_engineering_session_start: true,
         active_run: active.runDir,
         capabilities: caps,
         warning: "run 目录存在但 run-state.json 缺失或不可解析",
-      });
+      };
+      if (markerWarning !== null) payload.worktree_marker_warning = markerWarning;
+      return injectContext(payload);
     }
 
     const tm = state.trust_mode;
@@ -154,7 +168,7 @@ export async function handle(input: HookInput): Promise<HookOutput> {
     }
 
     // 5. 注入 capabilities + run 状态
-    return injectContext({
+    const payload: Record<string, unknown> = {
       loop_engineering_session_start: true,
       active_run: active.runDir,
       phase,
@@ -165,7 +179,9 @@ export async function handle(input: HookInput): Promise<HookOutput> {
       note:
         "actual_writes 采集优先级: git_diff > fs_snapshot > worker_self_report (§3.4); " +
         "若 detected 与 recorded 不一致, 主 agent 应协调者写新 capabilities",
-    });
+    };
+    if (markerWarning !== null) payload.worktree_marker_warning = markerWarning;
+    return injectContext(payload);
   } catch (e) {
     // SessionStart 异常 fail-safe: 退化放行, 不锁死会话
     void os; // 防 import 未用 (Node 内置, 始终可用, 此处显式 noop)

@@ -47,6 +47,7 @@ function dumpTask(t: Task): Record<string, unknown> {
     tests: t.tests.map(dumpTestCase),
     status: t.status,
     attempt: t.attempt,
+    detail_ref: t.detail_ref ?? null,
     service: t.service ?? null,
     provides_contracts: [...t.provides_contracts],
     consumes_contracts: [...t.consumes_contracts],
@@ -71,6 +72,11 @@ export function dumpTaskPlanYaml(plan: TaskPlan): string {
 
 /** 读 YAML 文本 → 原始数据 (校验交给 directory.ts 的 parseTaskPlan)。 */
 export function loadTaskPlanYaml(text: string): unknown {
+  return yaml.load(text);
+}
+
+/** 读 task detail YAML 文本 → 原始数据 (校验交给 parseTaskDetail)。 */
+export function loadTaskDetailYaml(text: string): unknown {
   return yaml.load(text);
 }
 

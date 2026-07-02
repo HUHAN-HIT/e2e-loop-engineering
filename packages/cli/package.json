@@ -1,6 +1,6 @@
 {
-  "name": "@e2e-loop/cli",
-  "version": "1.0.0",
+  "name": "e2e-loop",
+  "version": "1.1.0",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -8,6 +8,9 @@
     "directory": "packages/cli"
   },
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "e2e-loop": "dist/index.js"
   },
@@ -22,13 +25,11 @@
     "build": "tsup && node scripts/copy-install-assets.mjs",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "@e2e-loop/shared": "^1.0.0",
-    "@e2e-loop/adapter-claude-code": "^1.0.0",
-    "@e2e-loop/adapter-opencode": "^1.0.0",
-    "@e2e-loop/ssot": "^1.0.0"
-  },
   "devDependencies": {
+    "@e2e-loop/shared": "^1.1.0",
+    "@e2e-loop/adapter-claude-code": "^1.1.0",
+    "@e2e-loop/adapter-opencode": "^1.1.0",
+    "@e2e-loop/ssot": "^1.1.0",
     "@types/node": "^20.11.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"

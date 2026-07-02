@@ -55,7 +55,12 @@ CREATED → CLARIFYING(可跳过) → PLANNING → IMPLEMENTING → WRAPPING_UP 
 
 ### 阶段 0 · 接收需求与复杂度判定
 
-**启动默认 worktree(在人给出需求后、创建 run 之前):** 不询问用户是否使用隔离 git worktree。CLI 仍保持非交互, 不在 `e2e-loop init` 内部 prompt; coordinator 直接使用隔离 worktree 创建 run: `e2e-loop init <req.md> --worktree-mode auto`。CLI 缺省同样是 `auto`。`auto` 行为: 若当前 cwd 已是 git linked worktree, 绑定现有 worktree; 否则在仓库 `.worktrees/<run_id>` 下新建隔离 worktree, 避免本次开发与用户当前未提交改动混在一起。只有用户明确要求使用当前目录、强制新建或采用指定 worktree 时, 才显式改传 `--worktree-mode none` / `--worktree-mode always` / `--worktree-mode adopt`。
+**启动:worktree 隔离(在人给出需求后、推进前):** 不询问用户是否使用隔离 git worktree(CLI 仍非交互, 不在 `e2e-loop init` 内部 prompt)。按**宿主是否提供"同一会话内切工作树"的原生能力**分叉(能力驱动优雅降级):
+
+- **有该能力(如 Claude Code 的 `EnterWorktree`)——首选、零重开:** 调它把本会话 cwd 切进隔离 worktree(不重开会话), 在其中跑 `e2e-loop init <req.md> --worktree-mode none`(run 落 `worktree/runs`; 隔离已由该能力提供), **本会话直接续跑到 plan 签署**。治理成立: hook 每次执行按当前 cwd 定位 run, 治理该 worktree run。
+- **无该能力(仅有 worktree+hook, 如 OpenCode)——两会话边界:** coordinator 用 `e2e-loop init <req.md> --worktree-mode auto` 创建隔离 worktree(`auto`: cwd 已是 linked worktree 则绑定现有, 否则在 `.worktrees/<run_id>` 新建), 本会话**只做 bootstrap 即交还人**——请人 cd 进 `.worktrees/<run_id>` 开新会话接续(本会话不继续 dispatch/run: CLI gate 只放行 worktree 内执行, 且本会话 hook 不锚定 worktree); 已在 worktree 内则直接接续该 run, 不再 init。
+
+用户明确要求不使用隔离 → `--worktree-mode none` 就地推进(无 worktree); 采用已存在的 worktree → `--worktree-mode adopt`。
 
 读需求,一句话判定复杂度(写进 run-state 与 task-plan 顶部):
 

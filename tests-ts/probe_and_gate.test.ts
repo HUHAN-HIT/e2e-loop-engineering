@@ -249,3 +249,95 @@ test("恶劣输入 (cwd 含 NUL 字节) → 不抛错、不 deny、不锁会话"
   // 绝不 deny (probe_and_gate fail-safe = 放行, 不静默降级锁会话)
   expect(out!.decision).not.toBe("deny");
 });
+
+// ---------------------------------------------------------------------------
+// 改动② (worktree-only): worktree 内一致性正向自检
+//
+// findActiveRun 拿到 active 后, 用 cwd 的根 marker (.loop-engineering/worktree.json)
+// 校验 marker.run_id 与 active.runId 是否一致:
+//   - 一致 / 无 marker → 维持现有注入, 不加 warning。
+//   - 不一致 → 注入 warning (worktree 复用/状态错位提示)。
+//   - 异常仍退化放行, 守红线 (沿用既有用例 6 覆盖)。
+// ---------------------------------------------------------------------------
+
+/** 在 repoRoot 根写一个合法 worktree marker (绑定 markerRunId)。 */
+function writeCwdMarker(repoRoot: string, markerRunId: string): void {
+  const markerPath = path.join(repoRoot, ".loop-engineering", "worktree.json");
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  fs.writeFileSync(
+    markerPath,
+    JSON.stringify({
+      schema: "loop-engineering.worktree-marker.v1",
+      owner: "loop-engineering",
+      run_id: markerRunId,
+      created_at: "2026-06-29T00:00:00.000Z",
+    }),
+    "utf-8",
+  );
+}
+
+test("[改动②] cwd marker.run_id 与 active run 一致 → 正常注入, 无 worktree 错位 warning", async () => {
+  const repoRoot = makeRepoRoot("wt-match");
+  makeRun(repoRoot, "20260101-001", {
+    run_id: "20260101-001",
+    phase: "IMPLEMENTING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    active_tasks: ["t1"],
+  });
+  // marker 与 active run 同 id
+  writeCwdMarker(repoRoot, "20260101-001");
+
+  const out = await handleProbeAndGate(sessionStartInput(repoRoot));
+
+  expect(out.decision).toBe("defer");
+  const ctx = out.context!;
+  // 一致 → 不应有 worktree 错位 warning (warning 字段缺失或不含 worktree 错位语义)
+  const w = ctx.worktree_marker_warning;
+  expect(w === undefined || w === null).toBe(true);
+  // 仍维持现有注入
+  expect(ctx.trust_mode).toBe("collaborative");
+});
+
+test("[改动②] cwd marker.run_id 与 active run 不一致 → 注入 worktree 错位 warning", async () => {
+  const repoRoot = makeRepoRoot("wt-mismatch");
+  makeRun(repoRoot, "20260101-002", {
+    run_id: "20260101-002",
+    phase: "IMPLEMENTING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    active_tasks: ["t1"],
+  });
+  // marker 绑定的是另一个 run
+  writeCwdMarker(repoRoot, "20251231-009");
+
+  const out = await handleProbeAndGate(sessionStartInput(repoRoot));
+
+  // 不锁死会话 (仍 defer, 不 deny)
+  expect(out.decision).toBe("defer");
+  expect(out.decision).not.toBe("deny");
+  const ctx = out.context!;
+  // 应注入 worktree marker 错位 warning
+  expect(typeof ctx.worktree_marker_warning).toBe("string");
+  expect(String(ctx.worktree_marker_warning)).toContain("20251231-009");
+});
+
+test("[改动②] cwd 无 marker → 维持现有行为 (无 worktree 错位 warning)", async () => {
+  const repoRoot = makeRepoRoot("wt-nomarker");
+  makeRun(repoRoot, "20260101-003", {
+    run_id: "20260101-003",
+    phase: "IMPLEMENTING",
+    complexity: "simple",
+    trust_mode: "collaborative",
+    active_tasks: ["t1"],
+  });
+  // 不写 marker
+
+  const out = await handleProbeAndGate(sessionStartInput(repoRoot));
+
+  expect(out.decision).toBe("defer");
+  const ctx = out.context!;
+  const w = ctx.worktree_marker_warning;
+  expect(w === undefined || w === null).toBe(true);
+  expect(ctx.active_run).not.toBe(null);
+});

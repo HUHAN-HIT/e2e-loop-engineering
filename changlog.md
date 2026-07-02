@@ -56,6 +56,108 @@
     (非空 set 锚 / 空 skip_basis 不 set / 非空在 PLANNING throw) 与 answerClarification
     (清锚+推进 PLANNING / 无锚仍推进 向后兼容).
 
+### 变更 — worktree bootstrap 支持 EnterWorktree 同会话续跑, 消除被迫重开 (2026-07-01)
+
+问题: §0 规定主根会话 bootstrap 建 worktree 后停回合、让用户**重开**一个 worktree 会话续跑。逐层
+挖到本质: 重开不是隔离的内在要求, 是 loop 把 hook 治理绑定到"会话启动 cwd"的选择(hook 每次执行按
+`payload.cwd` 定位 run, run 在 `worktree/runs` 只有从 worktree 启动的会话 cwd 才对得上)。之前的
+"自动重开"补救(弹终端 `resume` / headless)全撞环境壁垒: 无交互桌面(SESSIONNAME 空)+ agent 起的
+子 claude 401 认证失败。
+
+突破口(已实测两层验证): Claude Code 的 `EnterWorktree` 是"**同一会话内**建 worktree + 切 session
+cwd", 不是重开。① cwd 探针证明 EnterWorktree 后 hook `payload.cwd` 跟随切到 worktree; ② 在装了
+hook 的目标项目里, worktree 内建 run 后 Write `.claude/` 被 deny、Write 源码被 phase 门禁 deny
+(reason 含 "phase=CREATED") —— 证明 `guard_paths` 在 worktree cwd 找到该 run 并按 phase 精准治理。
+即"同会话切进 worktree, 治理跟上, 不重开、不损治理"。
+
+- **coordinator §0 能力驱动分叉**(`core/coordinator.md`): 有 `EnterWorktree` 工具 → 调它切进
+  worktree + `e2e-loop init --worktree-mode none`(run 落 `worktree/runs`)+ **本会话直接续跑到
+  plan 签署, 零重开**; 无 `EnterWorktree`(OpenCode 等)→ 退回 `--worktree-mode auto` + `resume`/
+  重开(现状)。遵循既有"有 AskUserQuestion 则弹框、无则文本"的能力降级范式, 不破坏双宿主一致。收口
+  (COMPLETE)后 `ExitWorktree(action:"keep")` 保留分支供 commit/PR。
+- **run_id 跨 worktree 防撞**(`dryrun.ts` `allWorktreeRunsRoots`): none 模式序号源纳入所有 git
+  worktree 的 `runs/`(用 `git worktree list`), 避免各 EnterWorktree worktree 都从 `...-001` 撞号;
+  非 git 降级为空、不回归。
+- **`resume`/`runs` 降级为兜底而非主路径**: `resume`(上条新增的弹终端续跑)现仅作"无 EnterWorktree"
+  降级路径的手动兜底; `runs` 并行总览仍用。连带提交 `resume` run 定位修复(`locateRunDir`: 从主根也
+  能定位 worktree 模式 run)。
+- **测试**: `worktree_prompt_contract` 加 EnterWorktree 分叉断言; `cli_worktree_seq` 测防撞序号源;
+  `cli_resume` 定位回归。
+- **传播**: 已装目标项目需 `e2e-loop install --host cc --project-dir <target> --force` 重装 SKILL.md。
+
+### 新增 — worktree bootstrap 自动弹终端续跑 + e2e-loop runs 并行总览 (2026-07-01)
+
+观察: 目标项目里 `e2e-loop init --worktree-mode auto` 建完隔离 worktree 后, 协调器按阶段 0 停回合,
+让人**手动** `cd .worktrees/<run_id>` 再开新 Claude 会话续跑。根因: worktree 隔离要换 cwd + 换 `.claude`,
+而 CC 治理 hook 在 SessionStart 冻结、会话内无法重载 —— 换会话是 agent 的能力盲区。但"换会话"是**能力性**
+人工(该自动化掉), 与 `plan 签署` 这种**设计性**人锚点(SKILL §2 协作红线, 故意要人)不同, 不应让人在此被拦。
+
+- **新增 `e2e-loop resume <run_id>`** (`packages/cli/src/commands/dryrun.ts` / `index.ts` / `help.ts`):
+  读 run-state 拿 workdir, 按平台弹一个新终端在该 worktree 内起 `claude "/loop-engineering"` 会话续跑到
+  plan 签署(win32 `start cmd /k`; darwin `osascript`; linux `x-terminal-emulator` best-effort)。纯函数
+  `buildResumeSpawn(platform, workdir)` 便于单测, spawner 依赖注入(测试注入 fake, 不真弹窗); 无已知终端 /
+  spawn 抛错 → 打印手动引导、退出 0(fail-safe 不锁死); none 模式 run(无 workdir)→ 提示就地续跑。
+- **协调器 §0 handoff 改为自动续跑** (`core/coordinator.md` §5 阶段 0): bootstrap 后 coordinator 自动跑
+  `e2e-loop resume <run_id>` 弹终端续跑再停回合, **人零操作**, 只在弹出窗口里等 plan 签署拍板; 保留 plan
+  签署人锚点, 不碰协作红线, 不动 `worktreeGate`/`guard_paths`/`findActiveRun` 治理架构。
+- **init 生成兜底脚本** (`runInit`): worktree 模式在 worktree 根写 `resume.cmd`/`resume.sh`(内容 cd + 起
+  `claude "/loop-engineering"`), 自动弹窗失败时双击手动进入; 引导文案同步改为"coordinator 自动弹终端续跑"。
+- **新增 `e2e-loop runs` 并行总览**: 扫主根 `runs/` + `.worktrees/*/runs/`, 表格列各 run 的 phase /
+  human_pending / complexity / workdir(支持 `--json`), 并行开多 run 时一眼看全哪条支线停在 plan 签署。
+- **测试**: `tests-ts/cli_resume.test.ts`(buildResumeSpawn 各平台 + none 模式 + spawn 降级 + 注入 spawner)、
+  `tests-ts/cli_runs_overview.test.ts`(真 git 夹具, 主根 + worktree run 总览 / `--json` / 空), resume 脚本生成断言。
+- **传播**: 已装目标项目需 `e2e-loop install --host cc --project-dir <target> --force` 重装 SKILL.md 方生效
+  (源仓库 `core/coordinator.md` 是 SSOT)。
+
+### 修复 — 目标项目阶段 0 CLI 定位修错配, 接线 doctor (2026-07-01)
+
+观察到协调会话在**目标项目**(被 install 过资产、无 `packages/` 的普通仓库, 如 jeepay3)里跑阶段 0 时,
+仍做一串无谓 shell 探测(`which e2e-loop` / `e2e-loop --version` / `e2e-loop --help | head` / `ls .claude/hooks`),
+并据此**误判**"CLI 只暴露 install/uninstall"。经核对: 该目标项目的 SKILL.md **已是最新**(含 §3.5、行数与源
+`core/coordinator.md` 一致), 全局 `e2e-loop@1.0.0` **功能完整**(`init`/`plan`/`run`/`dispatch`/`doctor` 全有)——
+故此坑与 2026-06-30 那条的"旧快照未传播"**无关**, 是**提示词与目标项目形态错配**:
+
+- 根因①: §3.5 原写"不确定就直接用项目内入口 `node packages/cli/dist/index.js`", 但目标项目**没有 `packages/`**,
+  该逃生路径落空, 协调器被逼回退 `where`/`which` —— 恰是 §3.5 前半句禁止的动作(自相矛盾)。
+- 根因②: 协调器用 `e2e-loop --version`(CLI 无此顶层标志 → 报"缺少子命令")+ `--help | head -N`(截断子命令列表)
+  去探能力, 两个错误叠加 → 把功能完整的 CLI 误判成"只有 install/uninstall"。
+- 根因③: `f6caf9d` 加了 `e2e-loop doctor` 却未在 `core/coordinator.md` 接线, 协调器不知该用它做机械 preflight。
+
+修复(均在 `core/coordinator.md`):
+
+- **§3.5 `e2e-loop` 定位改为分运行形态**: 目标项目里 `e2e-loop` 就是 install 写进 `settings.json` 的命令
+  (默认全局 `e2e-loop`, 功能完整), 直接调用即可; 源码 checkout 里才用 `node packages/cli/dist/index.js`。
+  显式禁止 `e2e-loop --version`(无此标志)与 `e2e-loop --help | head -N`(截断致误判)这两种探测手法,
+  要看子命令就**完整**读 `--help` 或跑 `doctor`。
+- **接线 doctor**: 两种形态都指向 `e2e-loop doctor`(源码 checkout 可 `--json` 一把梭校验入口/产物/文档);
+  阶段 0 的"不要 shell 现探"清单补入 `e2e-loop --version`, 并回指 §3.5 的形态定位与 doctor。
+- **doctor 目标项目适配未纳入本次**: 当前 `doctor` 的 `findRepoRoot` 面向源码 checkout(找 `core/manifest.json`
+  + `packages/cli`), 在目标项目里会报多项 fail; 故本次措辞只在**源码 checkout**场景把 doctor 当一把梭,
+  目标项目场景以 SessionStart 注入的 `active_run` + 直接调用全局 `e2e-loop` 为准(避免接线后在目标项目误导)。
+- **传播**: 已装目标项目的 SKILL.md 需 `e2e-loop install --host cc --project-dir <target> --force` 重装方生效
+  (源仓库 `core/coordinator.md` 是 SSOT)。
+
+### 修复 — 协调器补 shell 纪律, 阶段 0 bootstrap 不再无谓 shell 探测 (2026-06-30)
+
+观察到协调会话在 Windows 上做阶段 0 worktree bootstrap 时, 把 PowerShell 语法
+(`if (Test-Path ...) {...} else {...}` / `Get-Content` / `$LASTEXITCODE`)塞进 Bash 工具,
+触发 Git Bash 报 `syntax error near unexpected token '{'`。根因: `core/coordinator.md`
+只描述了 worktree marker 与 `active_run` 信号, 但**未规定用什么工具探测**, 且全文**零 shell 纪律**,
+导致 agent ① 无谓 shell 现探(`where` / `Test-Path` / `git worktree list`)② 混用 PowerShell/POSIX 语法。
+
+- **新增 §3.5 工具与 shell 纪律**(`core/coordinator.md`):判会话状态/读产物优先用结构化工具
+  (`active_run` 信号 + Read 工具), 不 shell 现探;必须执行命令时守"Bash 工具 != 系统原生 shell,
+  一条命令只用一种语法、绝不混写"红线(Windows 上 Bash 工具=Git Bash POSIX, 系统原生=PowerShell;
+  反斜杠/中文路径优先 PowerShell)。明确对 CC / OC 两宿主同等适用(OS 层差异, 与宿主无关)。
+- **收紧阶段 0 bootstrap 措辞**(`core/coordinator.md` §5 阶段 0):判"在不在 worktree"优先看注入的
+  `active_run`(权威信号), 需佐证再用 Read 工具读 marker, 显式禁止 `Test-Path`/`git worktree list`/
+  `where e2e-loop` 现探, 指向 §3.5。
+- **implementation-worker 同步补红线**(`core/subagents/implementation-worker.md` 第 3 步):worker
+  是独立上下文、看不到协调器 §3.5, 而它"跑测试到绿"必然 shell 出去, 同样暴露此坑;在跑测试/git 处
+  内联一条精简 shell 红线(同 §3.5 主旨)。
+- **传播**:已装到目标项目的 `.claude/skills/loop-engineering/SKILL.md` 为旧快照, 需 `e2e-loop
+  install --host cc --project-dir <target> --force` 重装方可生效(源仓库 `core/coordinator.md` 是 SSOT)。
+
 ### 新增 — 主 agent 不干活强制 (A+B 案, 2026-06-30)
 
 针对观察到的反复问题——主 agent 在 plan/implement 阶段绕过 Task 工具直接扮演 worker 写产物,
@@ -93,6 +195,54 @@
   caller=undefined 由来注释, 说明 OC plugin runtime 无 agent_id/agent_type 等价物, 身份治理
   仅在 CC 端生效 (这是已知跨宿主差异, 非缺陷).
 
+### 修复 — worktree existing/adopt 分支补写根 marker (缺口 B, 2026-06-30)
+
+`allocateRunWorktree` 此前只有 `created` 分支写 worktree 根 marker; `existing`(auto 命中已在
+linked worktree)与 `adopted`(adopt)两条分支虽设了 `workdir`(令 run 进入 worktree 模式、激活
+`worktreeGate`)却不写 marker, 导致 `worktreeGate` 因 `readWorktreeMarker(cwd)=null` 永久拒绝
+该 run 的 dispatch/run。
+
+- **统一经 `bindWorktreeMarker` 写 marker**(`packages/ssot-ts/src/worktree/allocator.ts`):新增
+  helper, 写前核对既有 marker——若根已绑定属于本 owner 且 run_id 不同的 marker 则 throw 拒绝
+  (机械兑现 spec 2026-06-29-worktree-only-isolation 改动③ 中 existing/adopt 分支缺失的"一个
+  worktree 一个 run"防撞)。`created`/`existing`/`adopt` 三条分支统一调用本 helper。
+- **测试**(`tests-ts/ssot/worktree_allocator.test.ts` 新增 3 例):adopt 写根 marker、auto-命中-
+  linked-worktree 的 existing 分支写根 marker、目标根已绑别的 run 时拒绝。
+
+### 文档 — coordinator 启动两会话边界 (缺口 A, 2026-06-30)
+
+`core/coordinator.md` §阶段0 此前隐含"主工程根会话 init 后同会话继续推进", 但该会话 cwd 在主工程根:
+后续 dispatch/run 被 worktreeGate 拒, 且其 loop hook 按非-worktree cwd 解析、worktree 隔离 hook 不生效。
+据 spec 2026-06-29-worktree-only-isolation 的真实工作流, 改为明确"两会话边界":
+
+- **`core/coordinator.md`:** §阶段0 worktree 段重写为"判断当前会话在不在 worktree"——不在(主工程根)则 init
+  后只做 bootstrap 并交还人去 worktree 开新会话, 本会话不继续 PLANNING/dispatch/run; 已在 worktree 内
+  则直接接续该 run、不再 init。"停回合的唯一依据"硬不变量增列 bootstrap 交还为合法停回合。
+- **`docs/loop-engineering-master-prompt.md` / `docs/loop-engineering-prompts.md`:** §阶段0 / 启动步同步
+  精简版两会话边界, 与 SKILL 一致(worktree_prompt_contract.test.ts 的三文档子串契约不破)。
+- 纯文档改动, 无代码 / gate / allocator 变更。
+
+### 修复 — 同步两条预存红测试 (2026-06-30)
+
+全量套件里两条预先就红、与 worktree 改动无关的用例, 根因均为"产品有意变更后测试未同步", 非代码回归:
+
+- **`tests-ts/publish_contract.test.ts`:** CLI 包已于 commit `9f1bd73` 有意改名 `@e2e-loop/cli` →
+  `e2e-loop`(与 bin 名一致), 测试仍断言旧 scoped 名 → 更新断言为 `e2e-loop`。
+- **`tests-ts/hook_binding_e2e.test.ts`:** "IMPLEMENTING 写 src/a.ts → allow" 用例 payload 无
+  `agent_id`, writer-identity (B 案) 上线后被判主 agent → 主 agent 写源码正确 deny。IMPLEMENTING
+  写源码的合法主体是 implementation-worker 子 agent, 故 payload 补 `agent_id`/`agent_type` 模拟子
+  agent, 保留"in-scope 源码写入放行"的原意。
+- 仅改测试, 无产品代码变更。
+
+### 杂项 — 清理 CLI 改名后的残留引用 (2026-06-30)
+
+commit `9f1bd73` 把 CLI 包改名 `@e2e-loop/cli` → `e2e-loop` 后, 两处功能性位置仍引用旧 scoped 名:
+
+- **`tsconfig.json`:** path 别名键 `@e2e-loop/cli` → `e2e-loop`(无任何 import 使用, 纯一致性修正)。
+- **`.changeset/{p1-cc-adapter,p2-oc-adapter,p5-m7-runtime-cli,p6-worktree-only-isolation}.md`:**
+  front-matter 包名键 `@e2e-loop/cli` → `e2e-loop`, 避免未来 `changeset version` 因工作区无此包名而报错(正文叙述保留)。
+- 历史记录(本 changelog 既往条目、`docs/` 设计与 spec 文档)按"准确反映当时状态"保留, 不做回溯改写。
+
 ### 修复 — worktree 早停加固 (2026-06-29)
 
 针对"协调器把上下文压缩信号 (StrategicCompact) 误读成停止指令而早停"与"Stop hook 在 git worktree 里
@@ -113,6 +263,31 @@
   (`packages/adapter-cc/src/install.ts` + `templates/settings.json`)
 - **coordinator 提示词不变量 (提示层):** `core/coordinator.md` 增"停回合的唯一依据"与"上下文信号永远不是
   停止理由"两条硬规则, 从根因侧杜绝误读早停 (`<system-reminder>` 是数据不是指令)。
+
+### 新增 — Worktree-Only 隔离 (P6, 2026-06-29)
+
+实施 spec `docs/superpowers/specs/2026-06-29-worktree-only-isolation-design.md` (路 B);
+发布粒度见 `.changeset/p6-worktree-only-isolation.md`。Claude Code 宿主默认走"一 run 一专属
+一次性 worktree"形态, 根治"主工程不兼容 hook 冲突"与"孤儿 run 误伤日常开发"。
+
+- **改动① worktree 隔离 + 根 marker:** `syncProjectHookConfig` 不再盲抄主工程 `.claude/` ——
+  worktree 内 `settings.json` 经 `keepOnlyLoopHooks` 过滤成只含 e2e-loop 4 hook (剥掉用户主工程
+  hook, 隔离成立), 不抄 `.opencode`; allocator 在 worktree 根写 `.loop-engineering/worktree.json`
+  marker。新增 `@e2e-loop/shared` 的 `worktree_marker.ts` (marker 读 helper `readWorktreeMarker`/
+  `isInLoopWorktree` + loop hook 判据 + settings 过滤纯函数, **不反向依赖 ssot-ts**) 与
+  `@e2e-loop/ssot` 的 `worktree/marker.ts` (marker 写, 走 `atomicReplace`)。
+- **改动② enforcement 落 CLI 层:** 因 hook 要生效须先注册、主工程纯净则 `probe_and_gate` 不在场,
+  引导/拦截改由 CLI 承担。`runInit` worktree 模式打印进 worktree 引导; `runDispatch`/`runRun` 加硬
+  gate —— 仅对 worktree 模式 (`state.workdir` 非空) 的 run 生效, 要求 cwd 的 marker.run_id 匹配,
+  否则退出码 2; none 模式一律放行 (零回归)。`probe_and_gate` 增 worktree 内一致性正向自检
+  (cwd marker.run_id 与 active run 不一致则注入 `worktree_marker_warning`, 一致/无 marker 维持原
+  行为, 异常仍退化放行守红线)。
+- **改动③ 一 worktree 一 run:** `runInit` 在 `allocateRunWorktree` 前若检测到 cwd 已是 loop
+  worktree (有 marker) 则拒绝再 init (退出码 2)。
+- **测试:** 新增 `tests-ts/worktree_marker.test.ts` / `tests-ts/cli_worktree_gate.test.ts`,
+  扩展 `tests-ts/probe_and_gate.test.ts` 与 `tests-ts/ssot/worktree_allocator.test.ts`;
+  全量 bun **577 pass / 0 fail**, `tsc --noEmit` 0 error, none 模式集成测试
+  (integration_dry_run / integration_dispatch_collect) 无回归。
 
 ### 新增
 

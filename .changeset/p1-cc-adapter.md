@@ -1,5 +1,5 @@
 ---
-"@e2e-loop/cli": minor
+"e2e-loop": minor
 "@e2e-loop/adapter-claude-code": minor
 "@e2e-loop/shared": minor
 ---

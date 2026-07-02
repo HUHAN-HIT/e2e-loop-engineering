@@ -161,6 +161,49 @@ test("[py: test_end_to_end_simple_run] CREATED→PLANNING→IMPLEMENTING→WRAPP
   expect(persisted.human_pending ?? null).toBeNull();
 });
 
+
+test("[detail] submitPlan 对 complex high-risk task 缺 detail_ref 进行 runtime gate", () => {
+  const runsRoot = path.join(makeTmp(), "runs");
+  const runId = "20260630-001";
+  const runDir = initRunDir(runsRoot, runId, "detail gate test");
+  writeRunState(runDir, parseRunState({ run_id: runId, complexity: "complex", phase: Phase.CREATED }));
+  fs.writeFileSync(
+    path.join(runDir, "clarification", "questions.json"),
+    JSON.stringify({
+      questions: [],
+      skip_basis: [{ considered: "task detail gate", why_non_blocking: "测试已固定输入" }],
+    }),
+    "utf-8",
+  );
+
+  const coord = new Coordinator(runDir, new RecordingWorkerRunner([]));
+  coord.startPlanning();
+  coord.submitPlan(
+    parseTaskPlan({
+      complexity: "complex",
+      tasks: [
+        {
+          id: "T01",
+          title: "高风险控制面 task",
+          allowed_write_paths: ["src/control/**"],
+          acceptance_refs: ["AC-001"],
+          depends_on: [],
+          exclusive: false,
+          risk: "high",
+          tests: [{ id: "T01-CASE-001", scenario: "gate", checks: ["passed == true"] }],
+        },
+      ],
+    }),
+  );
+
+  expect(coord.state.phase).toBe(Phase.PLANNING);
+  expect(coord.state.human_pending ?? null).toBeNull();
+  const failures = JSON.parse(
+    fs.readFileSync(path.join(runDir, "planning", "plan-check-failures.json"), "utf-8"),
+  ) as Array<{ check: string; detail: string }>;
+  expect(failures.some((f) => f.check === "task_detail_exists" && f.detail.includes("T01"))).toBe(true);
+});
+
 // ---------------------------------------------------------------------------
 // abort during planning (test_abort_during_planning)
 // ---------------------------------------------------------------------------

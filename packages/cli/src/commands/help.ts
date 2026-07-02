@@ -11,7 +11,7 @@ export function printHelp(stream: NodeJS.WriteStream = process.stdout): void {
   e2e-loop <command> [options]
 
 命令:
-  install       安装 Claude Code / OpenCode 资产到目标项目 .claude/
+  install       安装 Claude Code / OpenCode 资产到目标项目 (默认双装)
   uninstall     卸载已安装的资产 (只删本工具装的)
   list          列出目标项目 .claude/ 下本工具管理的资产
   hook <hook-name>  执行 Claude Code hook stdin/stdout 入口
@@ -44,7 +44,7 @@ worktree bootstrap 续跑 / 并行总览:
   --runs-root <dir>     dry-run 命令的 runs 根目录 (缺省: ./runs)
 
 install 选项:
-  --host <cc|oc|both>   必需。选择宿主 adapter
+  --host <cc|oc|both>   选择宿主 adapter (缺省: both)
                           cc   → Claude Code (.claude/)
                           oc   → OpenCode (.claude/skills/ + .opencode/)
                           both → 同时装两套 (共享 .claude/skills/)
@@ -52,7 +52,7 @@ install 选项:
   --force               覆盖已存在的文件 (默认: 跳过冲突文件)
   --dry-run             只预览不写盘
   --hook-mode <local|cli|auto>
-                       hook 安装模式; 默认 local
+                       hook 安装模式; 默认 cli
   --cli-command <cmd>   cli 模式写入 settings 的命令前缀; 默认 e2e-loop
 
 uninstall 选项:
@@ -98,9 +98,9 @@ worktree 续跑 / 总览选项:
               → 表格列出所有 run 的 phase / human_pending / complexity / workdir
 
 示例:
-  e2e-loop install --host cc --project-dir ./my-project
-  e2e-loop install --host cc --project-dir ./my-project --force
-  e2e-loop install --host cc --dry-run
+  e2e-loop install
+  e2e-loop install --force
+  e2e-loop install --dry-run
   e2e-loop list --project-dir ./my-project
   e2e-loop doctor --doc docs/superpowers/specs/example.md
   e2e-loop install --host cc --hook-mode cli --cli-command e2e-loop

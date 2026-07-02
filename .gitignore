@@ -33,3 +33,14 @@ node_modules/
 dist/
 .bun/
 *.tsbuildinfo
+
+# >>> loop-engineering managed >>>
+# loop-engineering 自动维护, 勿手改
+.claude/
+.opencode/
+.loop-engineering/
+.worktrees/
+runs/
+resume.cmd
+resume.sh
+# <<< loop-engineering managed <<<

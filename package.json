@@ -14,5 +14,8 @@
     "test": "bun test tests-ts/",
     "publish:all": "npm publish --workspaces --access public",
     "publish:dry": "npm publish --workspaces --access public --dry-run"
+  },
+  "devDependencies": {
+    "e2e-loop": "^1.1.0"
   }
 }

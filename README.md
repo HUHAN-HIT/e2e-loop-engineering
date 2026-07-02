@@ -10,26 +10,28 @@
 
 发布包名是 `e2e-loop`, 命令名也是 `e2e-loop`。
 
-全局安装后可在任意测试工程中直接安装 Loop Engineering 资产:
+全局安装后可在任意测试工程中直接安装 Loop Engineering 资产。`install` 默认双装 Claude Code + OpenCode, 目标目录缺省为当前目录:
 
 ```bash
 npm install -g e2e-loop
-e2e-loop install --host both --project-dir <path>
+cd <path>
+e2e-loop install
 ```
 
 如果只想安装到当前测试工程, 使用本地 dev dependency + `npx`:
 
 ```bash
 npm install -D e2e-loop
-npx e2e-loop install --host both
+npx e2e-loop install
 ```
 
 `<cc|oc|both>`: `cc` = Claude Code, `oc` = OpenCode, `both` = 双装。
 
 ```bash
-e2e-loop install --host cc   --project-dir <path>   # 仅 Claude Code
-e2e-loop install --host oc   --project-dir <path>   # 仅 OpenCode
-e2e-loop install --host both --project-dir <path>   # 双装 (共享 .claude/skills/)
+e2e-loop install                                # 默认双装到当前目录
+e2e-loop install --host cc --project-dir <path>   # 仅 Claude Code
+e2e-loop install --host oc --project-dir <path>   # 仅 OpenCode
+e2e-loop install --host both --project-dir <path> # 显式双装 (共享 .claude/skills/)
 ```
 
 - `cc` 落 `.claude/` (settings.json + 4 个 hook .mjs + skill + 4 个 subagent)。
@@ -41,7 +43,7 @@ e2e-loop install --host both --project-dir <path>   # 双装 (共享 .claude/ski
 ```bash
 npm install        # 安装 workspace 依赖
 npm run build      # 构建 adapter-cc hooks (.mjs) + adapter-oc plugin (.js) + CLI bundle
-node packages/cli/dist/index.js install --host both --project-dir <path>
+npm run cli -- install --project-dir <path>
 ```
 
 源码 checkout 的 CLI 入口是 TypeScript monorepo 形态, 不是旧的 Python
@@ -67,7 +69,7 @@ npm run cli -- help
 
 | 命令 | 说明 |
 | --- | --- |
-| `install`   | 安装 Claude Code / OpenCode 资产到目标项目 (`--host`, `--project-dir`, `--force`, `--dry-run`) |
+| `install`   | 安装 Claude Code / OpenCode 资产到目标项目 (默认 `--host both`, 可配 `--project-dir`, `--force`, `--dry-run`) |
 | `uninstall` | 卸载已安装资产 (只删本工具装的) |
 | `list`      | 列出目标项目下本工具管理的资产 |
 | `doctor`    | 启动前自检 CLI 入口、构建产物与可选设计文档路径 |

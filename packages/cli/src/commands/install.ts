@@ -2,7 +2,7 @@
  * e2e-loop install 子命令。
  *
  * 用法:
- *   e2e-loop install --host <cc|oc|both> --project-dir <path> [--force] [--dry-run]
+ *   e2e-loop install [--host <cc|oc|both>] [--project-dir <path>] [--force] [--dry-run]
  *
  * 行为:
  *   - host=cc:   调 claudeCodeAdapter.install(ctx) / dryRun(ctx)
@@ -75,11 +75,7 @@ async function installOne(
 }
 
 export async function runInstall(args: Args): Promise<number> {
-  const host = args.values.host;
-  if (!host) {
-    process.stderr.write("错误: 缺少必需参数 --host <cc|oc|both>\n");
-    return 1;
-  }
+  const host = args.values.host ?? "both";
   if (host !== "cc" && host !== "oc" && host !== "both") {
     process.stderr.write(
       `错误: --host 只接受 cc | oc | both, 收到: ${host}\n`,

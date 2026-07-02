@@ -139,6 +139,27 @@ test("e2e: install --host both 一次装好 CC 侧 + OC 侧, 共享 SKILL 不冲
     fs.rmSync(projectDir, { recursive: true, force: true });
   }
 });
+test("e2e: install 未显式 --host 时默认双装 CC + OC", () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "loop-default-host-"));
+  try {
+    const stdout = execFileSync(
+      process.execPath,
+      [CLI_BUNDLE, "install", "--project-dir", projectDir],
+      { cwd: REPO_ROOT, encoding: "utf-8" },
+    );
+
+    expect(stdout).toContain("[cc] install 完成:");
+    expect(stdout).toContain("[oc] install 完成:");
+    expect(
+      fs.existsSync(path.join(projectDir, ".claude", "settings.json")),
+    ).toBe(true);
+    expect(
+      fs.existsSync(path.join(projectDir, ".opencode", "opencode.json")),
+    ).toBe(true);
+  } finally {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+});
 
 test("e2e: install --host both, 共享 .claude/skills 由 CC 先写, OC 段标为 skipped (预期)", () => {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "loop-both-share-"));

@@ -171,19 +171,19 @@ tasks:
     risk: normal            # high = 控制面核心/安全/数据迁移/不可逆操作; high 的 task 在收口前自动触发红队 (§4)
     tests:
       - id: T01-CASE-001
-        scenario: 合法 finder/critic 产物通过澄清校验
-        checks: ["passed == true", "blocked_reasons == []"]
+        scenario: 合法 finder/critic 产物通过澄清校验, 校验结果 ok==true 且 blocked_reasons 为空
+        checks: ["passed == true"]
       - id: T01-CASE-002
-        scenario: 被拒的 critic verdict 阻塞澄清
-        checks: ["passed == false", "'clarification_not_approved' in blocked_reasons"]
+        scenario: "被拒的 critic verdict 阻塞澄清: 校验结果 ok==false 且 blocked_reasons 含 'clarification_not_approved'"
+        checks: ["passed == false", "'clarification_not_approved' in failure_reason"]
 ```
 
 对比旧版, 每个用例去掉了 `red_first`、`validation.method`、`assert_fields`、`expected_evidence` 这些防伪包装, 只留 `scenario` (测什么) 和 `checks` (断言什么)。worker 写测试去满足 `checks`, 跑绿了提交结果。**没有 red-first 时序证明, 没有 coordinator 独立重放。**
 
 **`checks` 的判定语义 (定死, 否则"客观可判定"是空话):** `checks` 每条是一个**机械可判**的断言, coordinator 不做语义理解, 只按固定文法求值:
 
-- **文法白名单:** 仅允许 `<lhs> <op> <rhs>` —— `lhs` 是 `test-results.yaml` 里该 case 输出的字段路径 (JSONPath 子集, 如 `passed`、`blocked_reasons`), `op` ∈ `{==, !=, in, not in, <, <=, >, >=}`, `rhs` 是字面量 (bool / 数字 / 字符串 / 数组)。不允许函数调用、表达式嵌套、自然语言。plan agent 写不出机械可判的断言 → 该用例不合格, 退回重写 (不是放行)。
-- **case 输出 schema 固定:** worker 的 `test-results.yaml` 中每个 case **只准填固定字段** `{id, passed: bool, failure_reason: str}` —— `passed` 供 `checks` 求值, `failure_reason` 仅供人读。worker **不得自创字段**去迎合某条 `checks` (那等于让被测方定义判定口径, 又一个 hallucination 落点); coordinator 求值时只认 schema 内字段, 遇未知字段路径 → 判该 check 失败 + 告警。这样"测试绿"的判定权落在 coordinator 的机械求值, 不在 worker 的自由报告 (呼应 §0.2: 不让被测方经手判定数据)。
+- **文法白名单:** 仅允许 `<lhs> <op> <rhs>` —— `lhs` **只能**是 case 输出的固定三字段 `{id, passed, failure_reason}` 之一 (不是任意领域字段路径), `op` ∈ `{==, !=, in, not in, <, <=, >, >=}`, `rhs` 是字面量 (bool / 数字 / 字符串 / 数组)。不允许函数调用、表达式嵌套、自然语言。**领域断言 (如 `ok==false`、`reason=='captcha_invalid'`、验证码 5 位) 不写进 `checks`, 而是写进 worker 的测试代码, 由 worker 判定后落到 `passed` (失败时把关键标识写进 `failure_reason`)。** `checks` 只断言 case 结果: 正路径 `passed == true`; 负路径 `passed == false` 加可选的 `'captcha_invalid' in failure_reason` (子串判定, 见 §3.1 line186)。plan agent 写不出机械可判的断言, 或 `lhs` 引用了三字段以外的领域字段 → 该用例不合格, 退回重写 (不是放行)。**plan_check 现在会在 PLANNING 阶段就前置拒绝引用非白名单字段的 check (自检项 `case_checks_grammar`), 让这类死锁在计划阶段暴露, 而不是拖到 IMPLEMENTING 阶段全 case fail。**
+- **case 输出 schema 固定:** worker 的 `test-results.yaml` 中每个 case **只准填固定字段** `{id, passed: bool, failure_reason: str}` —— `passed` 供 `checks` 求值, `failure_reason` 仅供人读, 也可被 `checks` 的 `in`/`not in` 做子串断言 (如 `'captcha_invalid' in failure_reason`)。worker **不得自创字段**去迎合某条 `checks` (那等于让被测方定义判定口径, 又一个 hallucination 落点); coordinator 求值时只认 schema 内三字段, 遇未知字段路径 → 判该 check 失败 + 告警。这样"测试绿"的判定权落在 coordinator 的机械求值, 不在 worker 的自由报告 (呼应 §0.2: 不让被测方经手判定数据)。
 
 多服务场景下, task 还会增加 `service`、`provides_contracts`、`consumes_contracts` 字段, 跨服务的写路径隔离、契约建模与集成测试见 §11; 单服务 run 不涉及这些字段。
 

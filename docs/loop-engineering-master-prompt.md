@@ -214,11 +214,11 @@ tasks:
     risk: normal          # high = 控制面核心/安全/迁移/不可逆;high 在收口前自动触发红队
     tests:
       - id: T01-CASE-001
-        scenario: 合法产物通过校验
-        checks: ["passed == true", "blocked_reasons == []"]
+        scenario: 合法产物通过校验, 校验结果 ok==true 且 blocked_reasons 为空
+        checks: ["passed == true"]
       - id: T01-CASE-002
-        scenario: 被拒 verdict 阻塞校验
-        checks: ["passed == false", "'not_approved' in blocked_reasons"]
+        scenario: "被拒 verdict 阻塞校验: 校验结果 ok==false 且 blocked_reasons 含 'not_approved'"
+        checks: ["passed == false", "'not_approved' in failure_reason"]
 ```
 
 **目录结构:**

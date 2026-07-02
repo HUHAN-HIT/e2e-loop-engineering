@@ -318,6 +318,45 @@ describe("TestEvalCheck", () => {
     expect(r.error!.includes("unknown field")).toBe(true);
     expect(r.error!.includes("missing")).toBe(true);
   });
+
+  // ----- in / not in 对 string 字段的子串语义 (三字段 schema 下唯一能用 in 的负路径) -----
+
+  test("[子串] 'captcha' in failure_reason 命中 → pass", () => {
+    const r = evalCheck(chk("'captcha' in failure_reason"), {
+      failure_reason: "captcha_invalid",
+    });
+    expect(r.passed).toBe(true);
+    expect(r.error).toBeNull();
+  });
+
+  test("[子串] 'captcha' in failure_reason 未命中 (空串) → fail 但无类型错误", () => {
+    const r = evalCheck(chk("'captcha' in failure_reason"), { failure_reason: "" });
+    expect(r.passed).toBe(false);
+    expect(r.error).toBeNull();
+  });
+
+  test("[子串] 'x' not in failure_reason 取反语义", () => {
+    // 不含 x → not in 为真
+    const r1 = evalCheck(chk("'x' not in failure_reason"), { failure_reason: "abc" });
+    expect(r1.passed).toBe(true);
+    expect(r1.error).toBeNull();
+    // 含 x → not in 为假
+    const r2 = evalCheck(chk("'x' not in failure_reason"), { failure_reason: "axc" });
+    expect(r2.passed).toBe(false);
+    expect(r2.error).toBeNull();
+  });
+
+  test("[子串] rhs 非 string 却对 string 字段用 in → 保持类型错误行为", () => {
+    // 数字字面量 in string 字段: 既非 array 也非 (string,string), 应报类型错误
+    const r = evalCheck(chk("1 in failure_reason"), { failure_reason: "1abc" });
+    expect(r.passed).toBe(false);
+    expect(r.error).not.toBeNull();
+  });
+
+  test("[子串] 数组语义不变: 'a' in tags 仍按成员判定", () => {
+    expect(evalCheck(chk("'a' in tags"), { tags: ["a", "b"] }).passed).toBe(true);
+    expect(evalCheck(chk("'z' in tags"), { tags: ["a", "b"] }).passed).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

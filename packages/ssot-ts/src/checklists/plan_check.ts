@@ -16,6 +16,7 @@
  * - all_pass @property → 工厂函数计算后写入对象字段 (与 checks_eval 子包风格一致)。
  * - f"{x!r}" repr → pyRepr (字符串加单引号), 测试只断言关键子串。
  */
+import { CheckParseError, parseCheck } from "./checks_eval.js";
 import { pathGlobsOverlap as pathGlobsOverlapRef } from "../scheduling/path_overlap.js";
 import type { ClarificationQuestions } from "../schema/clarification.js";
 import type { ServiceContracts } from "../schema/service_contracts.js";
@@ -90,6 +91,7 @@ export function checkPlan(
   const items: PlanCheckItem[] = [];
   items.push(...checkAcHasTaskAndTest(plan));
   items.push(...checkTaskHasRequiredFields(plan));
+  items.push(...checkCaseChecksGrammar(plan));
   items.push(...checkParallelPathsDisjoint(plan, pathOverlapFn));
   items.push(...checkDepsNoCycle(plan));
   if (options?.taskDetails !== undefined) {
@@ -233,6 +235,68 @@ function checkTaskHasRequiredFields(plan: TaskPlan): PlanCheckItem[] {
 /** 渲染字符串列表为近似 Python list repr `['a', 'b']` (测试只断言子串)。 */
 function pyList(xs: readonly string[]): string {
   return `[${xs.map((x) => pyRepr(x)).join(", ")}]`;
+}
+
+/** case 输出 schema 固定字段 (design §3.1): checks 的 lhs 只能引用这三个。 */
+const CASE_OUTPUT_FIELDS = new Set(["id", "passed", "failure_reason"]);
+
+/**
+ * 每条 case check 必须语法合法, 且 lhs 只引用 case 输出固定字段 {id,passed,failure_reason}。
+ *
+ * 方向 B (根因修复): case 输出 schema 被 `.strict()` 冻结为三字段, evalCase 只从这三字段
+ * 构造 caseFields。若 check 引用领域字段 (file_exists / section_count / has_section_scope 等),
+ * evalCheck 在 IMPLEMENTING 阶段会判 "unknown field" → 全 case fail → tests_green 恒 false,
+ * 即使 deliverable 完整、worker 自报通过, run 也会静默死锁。此前置门把该问题提前成
+ * PLANNING 阶段可诊断的失败: 领域断言应写进 worker 的测试代码内, 由 worker 判定后落到
+ * case.passed, checks 只断言 passed / failure_reason。
+ *
+ * 遍历每条 check 字符串:
+ * - parseCheck 抛 CheckParseError → fail (detail 含 task/case/raw/原因)。
+ * - 解析成功但 lhs 不在白名单 → fail (detail 含 task/case/raw/非法字段名 + 引导)。
+ * - 全部合法 → 追加一条 pass (check 名 "case_checks_grammar", 同 parallel_paths_disjoint 风格)。
+ */
+function checkCaseChecksGrammar(plan: TaskPlan): PlanCheckItem[] {
+  const items: PlanCheckItem[] = [];
+  for (const task of plan.tasks) {
+    for (const testCase of task.tests) {
+      for (const raw of testCase.checks) {
+        let check;
+        try {
+          check = parseCheck(raw);
+        } catch (e) {
+          if (e instanceof CheckParseError) {
+            items.push(
+              mkItem(
+                "case_checks_grammar",
+                false,
+                `task ${task.id} case ${testCase.id} 的 check ${pyRepr(raw)} ` +
+                  `解析失败: ${e.reason}`,
+              ),
+            );
+            continue;
+          }
+          throw e;
+        }
+        if (!CASE_OUTPUT_FIELDS.has(check.lhs)) {
+          items.push(
+            mkItem(
+              "case_checks_grammar",
+              false,
+              `task ${task.id} case ${testCase.id} 的 check ${pyRepr(raw)} ` +
+                `引用了非法字段 ${pyRepr(check.lhs)}; checks 的 lhs 只能是 case 输出固定字段 ` +
+                "{id,passed,failure_reason}。领域断言(如 file_exists/section_count)应写进 " +
+                "worker 的测试代码内, 由 worker 判定后落到 case.passed, checks 只断言 " +
+                "passed/failure_reason (design §3.1)",
+            ),
+          );
+        }
+      }
+    }
+  }
+  if (!items.some((it) => it.check === "case_checks_grammar" && !it.passed)) {
+    items.push(mkItem("case_checks_grammar", true, "所有 case check 仅引用固定字段"));
+  }
+  return items;
 }
 
 /**

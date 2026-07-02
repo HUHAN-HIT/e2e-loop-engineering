@@ -29,7 +29,7 @@ AC (可观测行为)
 
 **每环的判据:** `[S][M][C]`
 1. **scenario**: 一句话, 含"情形 + 动作", 指向**一条**具体 AC (`acceptance_refs`)。不写"测试登录"这种没有动作的标题。
-2. **checks**: 每条形如 `<lhs> <op> <rhs>`——lhs 是产物里**可观测的输出字段路径** (如 `ok`、`reason`、`status`、`blocked_reasons`), op ∈ `{==,!=,in,not in,<,<=,>,>=}`, rhs 是字面量。
+2. **checks**: 每条形如 `<lhs> <op> <rhs>`——lhs **只能**是 case 输出的固定三字段 `{id, passed, failure_reason}` 之一 (不是任意领域字段路径), op ∈ `{==,!=,in,not in,<,<=,>,>=}`, rhs 是字面量。**领域断言 (ok、reason、status 等具体字段与值) 写进 worker 的测试代码, 由 worker 判定后落到 `passed`; `scenario` 负责说清要测什么。** checks 只断言 case 结果: 正路径 `passed == true`, 负路径 `passed == false` (可加 `'xxx' in failure_reason` 子串断言)。
 3. **可落地**: worker 拿到 scenario+checks, 不需要再问就能写出测试。写不出机械断言 → 该用例**退回重写**, 不放行。
 
 ---
@@ -50,19 +50,19 @@ AC (可观测行为)
 
 ## 3. checks 怎么写才"可机械判定"——反例清单 (关闭评审 A6)
 
-这是本标准最硬的部分。**checks 不是测试代码, 是给 coordinator 机械求值的断言**, 所以不许含语义、函数、嵌套。
+这是本标准最硬的部分。**checks 不是测试代码, 是给 coordinator 机械求值的断言**, 所以不许含语义、函数、嵌套。而且 **lhs 只能是 case 输出三字段 `{id, passed, failure_reason}`——领域字段值 (ok/reason/status/...) 由 worker 在测试代码内断言, 落到 `passed`。** 下表左列的模糊/自然语言表述一律不合格; 正确做法不是把它改成一条领域字段 check, 而是**把 scenario 写具体 (含领域细节)、checks 只断言 case 结果**。
 
-| ✗ 不可机械判定 | 为什么 | ✓ 改写 |
+| ✗ 不合格的 scenario/checks | 为什么 | ✓ 改写方向 |
 | --- | --- | --- |
-| `结果正确` | 自然语言, 无字段无算子 | `ok == true` |
-| `passed == is_valid(x)` | 含函数调用 | 先把 is_valid 的结果落成产物字段: `passed == true` |
-| `状态合理` | 形容词 | `status == 'active'` |
-| `reason 包含错误信息` | "包含""信息"不可判 | `reason == 'captcha_invalid'` |
-| `len(x) > 0 and y == 1` | 表达式嵌套/逻辑连接 | 拆成两条: `count > 0`、`y == 1` |
-| `response 看起来对` | 主观 | `code == 200`、`'token' in response_keys` |
-| `大致 5 位` | 模糊 | `digit_count == 5` |
+| checks 写 `结果正确` | 自然语言, 无字段无算子 | scenario 写"调用后响应 ok==true"; checks `["passed == true"]` |
+| checks 写 `passed == is_valid(x)` | 含函数调用 | 领域判定放进 worker 测试; checks `["passed == true"]` |
+| checks 写 `状态合理` | 形容词 | scenario 写"资源状态应为 active"; checks `["passed == true"]` |
+| checks 写 `reason 包含错误信息` | "包含""信息"不可判, 且 reason 非白名单字段 | scenario 写"响应 reason=='captcha_invalid'"; checks `["passed == false", "'captcha_invalid' in failure_reason"]` |
+| checks 写 `len(x) > 0 and y == 1` | 表达式嵌套/逻辑连接 + 领域字段 | 两个领域断言都进 worker 测试; checks `["passed == true"]` |
+| checks 写 `response 看起来对` | 主观 | scenario 写"响应 code==200 且含 token"; checks `["passed == true"]` |
+| checks 写 `大致 5 位` | 模糊 | scenario 写"验证码恰为 5 位数字"; checks `["passed == true"]` |
 
-**自检口诀:** 一条 check 若换个 agent 来判可能给出不同结论, 它就不是机械可判定的——退回重写。
+**自检口诀:** 一条 check 若换个 agent 来判可能给出不同结论, 或它的 lhs 不是 `{id,passed,failure_reason}` 之一, 它就不合格——领域细节挪进 scenario, checks 只断言 passed/failure_reason。
 
 ---
 
@@ -112,10 +112,10 @@ cases:
 **AC-002:** `提交错误验证码时, 校验接口返回 {ok:false, reason:"captcha_invalid"}`。
 
 **推导:**
-- scenario (negative): "提交一个错误的验证码, 期望被拒并给出原因"。
-- checks: `["ok == false", "reason == 'captcha_invalid'"]` —— 两个可观测字段, 字面量右值, 可机械判定。
-- 边界补充 `[C]`: 再加 scenario "提交空验证码" → checks `["ok == false", "reason == 'captcha_empty'"]`。
-- worker 落地: 写 `test_verify.py::test_wrong_captcha_rejected`, 构造错误验证码请求, 断言响应 `ok is False and reason == "captcha_invalid"`, 跑绿, 在 test-results.yaml 填 `{id: T02-CASE-002, passed: true, failure_reason: ""}`。
+- scenario (negative): "提交一个错误的验证码, 期望被拒: 响应 ok==false 且 reason=='captcha_invalid'"。领域细节 (ok/reason 的具体值) 写进 scenario, worker 据此写测试断言。
+- checks: `["passed == false", "'captcha_invalid' in failure_reason"]` —— 只断言 case 结果 (被拒) 与 failure_reason 含关键标识, lhs 都是白名单字段, 可机械判定。
+- 边界补充 `[C]`: 再加 scenario "提交空验证码, 期望被拒且 reason=='captcha_empty'" → checks `["passed == false", "'captcha_empty' in failure_reason"]`。
+- worker 落地: 写 `test_verify.py::test_wrong_captcha_rejected`, 构造错误验证码请求, 在测试代码内断言响应 `ok is False and reason == "captcha_invalid"` (领域断言), 跑绿后在 test-results.yaml 填 `{id: T02-CASE-002, passed: false, failure_reason: "captcha_invalid"}` —— 负路径用例 `passed` 表征"系统正确拒绝", failure_reason 承载关键标识供 `'captcha_invalid' in failure_reason` 断言。
 
 **反范式:** 把 scenario 写成 "测校验" (无动作)、checks 写成 `["校验失败时报错"]` (自然语言) —— 两者都退回重写。
 

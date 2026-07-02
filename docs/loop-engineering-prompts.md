@@ -126,7 +126,7 @@ input/requirement.md + (若有) clarification/*.json。
 2. 写 planning/design.md: 简明设计, 不写防伪/对抗机制。
 3. 拆 task 写 planning/task-plan.yaml: complex 必须拆成 DAG, 每个 task 小到一个 worker 能独立持有上下文。
 4. 每个 task 必含: id, title, allowed_write_paths, depends_on(可空数组), acceptance_refs, exclusive(改控制面/迁移/lockfile 置 true), risk(normal|high; high=控制面核心/安全/迁移/不可逆), tests。
-5. 每个 test case 只写 scenario(测什么) + checks(断言哪些字段/状态, 可机械判定)。**不写** red_first / assert_fields / expected_evidence 这些防伪包装。**checks 文法白名单** (coordinator 按固定文法机械求值, 不做语义理解): 每条只允许 `<lhs> <op> <rhs>` —— lhs 是 case 输出字段路径 (如 passed、blocked_reasons), op ∈ {==, !=, in, not in, <, <=, >, >=}, rhs 是字面量 (bool/数字/字符串/数组); 不许函数调用、表达式嵌套、自然语言。写不出机械可判的断言 → 该用例退回重写, 不放行 (见设计 §3.1)。
+5. 每个 test case 只写 scenario(测什么, 写具体含领域细节如"响应 ok==false 且 reason=='captcha_invalid'") + checks(只断言 case 结果, 可机械判定)。**不写** red_first / assert_fields / expected_evidence 这些防伪包装。**checks 文法白名单** (coordinator 按固定文法机械求值, 不做语义理解): 每条只允许 `<lhs> <op> <rhs>` —— **lhs 只能是 case 输出的固定三字段 {id, passed, failure_reason} 之一** (不是任意领域字段), op ∈ {==, !=, in, not in, <, <=, >, >=}, rhs 是字面量 (bool/数字/字符串/数组); 不许函数调用、表达式嵌套、自然语言。**领域断言写进 worker 测试, 由 worker 判定后落到 passed; 正路径 checks: ["passed == true"], 负路径 ["passed == false"] 加可选 "'captcha_invalid' in failure_reason" (子串断言)。** 写不出机械可判的断言, 或 lhs 引用三字段外的领域字段 → 该用例退回重写, 不放行; plan_check 会在 PLANNING 阶段前置拒绝违规 check (自检项 case_checks_grammar) (见设计 §3.1)。
 6. 每个 AC 至少被 1 个 task 和 1 个 test case 覆盖; complex/状态机/控制面 task 至少 1 个负向用例。
 7. 不确定某项怎么测时, 不许跳过: 写出测试假设, 或标记需澄清/amendment。
 8. (多服务) 产出 planning/service-contracts.yaml: 每个跨服务接口登记 provider/consumers/surface/acceptance_refs/integration_cases; task 加 provides_contracts / consumes_contracts。

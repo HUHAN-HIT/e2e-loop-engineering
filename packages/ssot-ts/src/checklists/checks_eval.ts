@@ -14,8 +14,13 @@
  * coordinator 求值时只认这三字段; 遇未知字段路径 -> 判该 check 失败 + 告警。
  *
  * `in` / `not in` 语义方向 (design §3.1 示例 `'<scalar>' in <array-field>`):
- * 字段值是数组时, rhs 是 scalar, 检查 "rhs ∈ field 值"。
- * 即 lhs 仍是字段路径, op 是 `in`, rhs 是 scalar, 求值时把 field 值视作集合。
+ * - 字段值是**数组**时, rhs 是 scalar, 检查 "rhs ∈ field 值" (成员判定)。
+ *   即 lhs 仍是字段路径, op 是 `in`, rhs 是 scalar, 求值时把 field 值视作集合。
+ * - 字段值是**字符串**且 rhs 是字符串时, 走**子串**语义: `in` = rhs 是 lhs 值的子串,
+ *   `not in` = 取反。三字段 schema ({id,passed,failure_reason}) 下 failure_reason 是 string,
+ *   `'captcha' in failure_reason` 这类负路径断言依赖此语义 (方向 B: 领域断言落到 case.passed,
+ *   checks 只断言 passed/failure_reason)。
+ * - 其它类型组合 (如 rhs 非 string 却对 string 字段用 in) → 保持类型错误行为, 不 coerce。
  *
  * 与 Python 的差异处理:
  * - Python `int` / `float` 区分 → TS 统一 `number` (相等/比较语义对测试用例等价)。
@@ -563,24 +568,37 @@ export function evalCheck(check: Check, caseFields: Record<string, unknown>): Ch
   } else if (op === Op.NE) {
     ok = !deepEqual(lhsVal, check.rhs);
   } else if (op === Op.IN) {
-    // design §3.1: lhs 是数组字段, rhs 是 scalar, 检查 "rhs ∈ field 值"。
-    if (!Array.isArray(lhsVal)) {
+    // 语义按 lhs 值类型分派:
+    // - 数组字段 (design §3.1): rhs 是 scalar, 检查 "rhs ∈ field 值" (成员判定)。
+    // - 字符串字段且 rhs 也是字符串: 子串判定 (failure_reason 负路径, 方向 B)。
+    // - 其它组合: 类型错误 (不 coerce)。
+    if (Array.isArray(lhsVal)) {
+      ok = lhsVal.some((el) => deepEqual(el, check.rhs));
+    } else if (typeof lhsVal === "string" && typeof check.rhs === "string") {
+      ok = lhsVal.includes(check.rhs);
+    } else {
       return {
         check,
         passed: false,
-        error: `op 'in' 要求字段 ${pyRepr(check.lhs)} 是数组, 实际类型 ${pyTypeName(lhsVal)}`,
+        error:
+          `op 'in' 要求字段 ${pyRepr(check.lhs)} 是数组, 或字段与 rhs 均为字符串 (子串判定); ` +
+          `实际字段类型 ${pyTypeName(lhsVal)}, rhs 类型 ${pyTypeName(check.rhs)}`,
       };
     }
-    ok = lhsVal.some((el) => deepEqual(el, check.rhs));
   } else if (op === Op.NOT_IN) {
-    if (!Array.isArray(lhsVal)) {
+    if (Array.isArray(lhsVal)) {
+      ok = !lhsVal.some((el) => deepEqual(el, check.rhs));
+    } else if (typeof lhsVal === "string" && typeof check.rhs === "string") {
+      ok = !lhsVal.includes(check.rhs);
+    } else {
       return {
         check,
         passed: false,
-        error: `op 'not in' 要求字段 ${pyRepr(check.lhs)} 是数组, 实际类型 ${pyTypeName(lhsVal)}`,
+        error:
+          `op 'not in' 要求字段 ${pyRepr(check.lhs)} 是数组, 或字段与 rhs 均为字符串 (子串判定); ` +
+          `实际字段类型 ${pyTypeName(lhsVal)}, rhs 类型 ${pyTypeName(check.rhs)}`,
       };
     }
-    ok = !lhsVal.some((el) => deepEqual(el, check.rhs));
   } else if (op === Op.LT || op === Op.LE || op === Op.GT || op === Op.GE) {
     // 数字比较: 双方都必须是 number (排除 bool)。
     if (!isNumber(lhsVal)) {

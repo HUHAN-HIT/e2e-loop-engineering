@@ -102,8 +102,8 @@ tasks:
     risk: normal
     tests:
       - id: T01-CASE-001
-        scenario: 请求验证码返回含 5 位数字的图片且服务端存有 token
-        checks: ["ok == true", "len(digits) == 5", "token_stored == true"]
+        scenario: 请求验证码返回 ok==true、图片含恰好 5 位数字且服务端已存有 token
+        checks: ["passed == true"]
   - id: T02
     title: 验证码校验接口
     allowed_write_paths: [src/auth/verify/**, tests/auth/verify/**]
@@ -113,11 +113,11 @@ tasks:
     risk: normal
     tests:
       - id: T02-CASE-001
-        scenario: 正确验证码通过校验
-        checks: ["ok == true"]
+        scenario: 正确验证码通过校验, 响应 ok==true
+        checks: ["passed == true"]
       - id: T02-CASE-002
-        scenario: 错误验证码被拒并给出原因
-        checks: ["ok == false", "reason == 'captcha_invalid'"]
+        scenario: "错误验证码被拒: 响应 ok==false 且 reason=='captcha_invalid'"
+        checks: ["passed == false", "'captcha_invalid' in failure_reason"]
   - id: T03
     title: 登录流程接入验证码校验
     allowed_write_paths: [src/auth/login/**, tests/auth/login/**]
@@ -128,11 +128,11 @@ tasks:
     detail_ref: planning/task-details/T03.yaml
     tests:
       - id: T03-CASE-001
-        scenario: 验证码正确时允许进入密码校验
-        checks: ["captcha_passed == true"]
+        scenario: 验证码正确时允许进入密码校验 (captcha_passed==true)
+        checks: ["passed == true"]
       - id: T03-CASE-002
-        scenario: 连续 5 次密码错误后锁定 (负向, 控制面必备)
-        checks: ["status == 423", "locked == true"]
+        scenario: "连续 5 次密码错误后账户被锁定 (负向, 控制面必备): 响应 status==423 且 locked==true"
+        checks: ["passed == false", "'account_locked' in failure_reason"]
 ```
 
 ---

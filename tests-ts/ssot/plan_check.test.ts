@@ -362,6 +362,83 @@ describe("TestClarificationEvidence", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// case_checks_grammar (方向 B: checks lhs 只能引用 {id,passed,failure_reason})
+// ---------------------------------------------------------------------------
+
+/** 构造一个 checks 可自定义的 task (绕过 mkTask 固定 checks)。 */
+function mkTaskWithChecks(tid: string, checks: string[]): Task {
+  return TaskSchema.parse({
+    id: tid,
+    title: tid,
+    allowed_write_paths: [`src/${tid}/**`],
+    acceptance_refs: [`AC-${tid}`],
+    depends_on: [],
+    tests: [{ id: `c-${tid}`, scenario: "s", checks }],
+    service: null,
+    provides_contracts: [],
+    consumes_contracts: [],
+    exclusive: false,
+    risk: "normal",
+    detail_ref: null,
+  });
+}
+
+describe("TestCaseChecksGrammar", () => {
+  test("case check 引用领域字段 file_exists → fail, detail 含字段名与提示", () => {
+    const plan = mkPlan([mkTaskWithChecks("T01", ["file_exists == true"])]);
+    const result = checkPlan(plan);
+    expect(result.all_pass).toBe(false);
+    const items = result.items.filter((i) => i.check === "case_checks_grammar");
+    expect(items.some((i) => !i.passed)).toBe(true);
+    const failed = items.find((i) => !i.passed)!;
+    expect(failed.detail).toContain("file_exists");
+    expect(failed.detail).toContain("只能");
+    expect(failed.detail).toContain("T01");
+  });
+
+  test("case check 引用领域字段 section_count → fail", () => {
+    const plan = mkPlan([mkTaskWithChecks("T01", ["section_count >= 3"])]);
+    const result = checkPlan(plan);
+    const items = result.items.filter((i) => i.check === "case_checks_grammar");
+    expect(items.some((i) => !i.passed)).toBe(true);
+    expect(items.find((i) => !i.passed)!.detail).toContain("section_count");
+  });
+
+  test("语法错误的 check (函数调用) → fail, detail 含 raw 与解析原因", () => {
+    const plan = mkPlan([mkTaskWithChecks("T01", ["file_exists(x) == true"])]);
+    const result = checkPlan(plan);
+    const items = result.items.filter((i) => i.check === "case_checks_grammar");
+    expect(items.some((i) => !i.passed)).toBe(true);
+    expect(items.find((i) => !i.passed)!.detail).toContain("file_exists(x)");
+  });
+
+  test("只用 {id,passed,failure_reason} 的 check → pass", () => {
+    const plan = mkPlan([
+      mkTaskWithChecks("T01", [
+        "passed == true",
+        "'captcha' in failure_reason",
+        "failure_reason == 'y'",
+        "id == 'c-T01'",
+      ]),
+    ]);
+    const result = checkPlan(plan);
+    const items = result.items.filter((i) => i.check === "case_checks_grammar");
+    expect(items.length > 0 && items.every((i) => i.passed)).toBe(true);
+  });
+
+  test("多 task 混合: 一个合法一个非法 → 该项存在 fail", () => {
+    const plan = mkPlan([
+      mkTaskWithChecks("T01", ["passed == true"]),
+      mkTaskWithChecks("T02", ["has_section_scope == true"]),
+    ]);
+    const result = checkPlan(plan);
+    const items = result.items.filter((i) => i.check === "case_checks_grammar");
+    expect(items.some((i) => !i.passed)).toBe(true);
+    expect(items.find((i) => !i.passed)!.detail).toContain("T02");
+  });
+});
+
 test("[py: test_contract_service_task_without_explicit_contract_declaration_fails]", () => {
   const contracts: ServiceContracts = ServiceContractsSchema.parse({
     contracts: [

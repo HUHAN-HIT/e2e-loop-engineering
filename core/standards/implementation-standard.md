@@ -22,7 +22,7 @@
 1. **命名自解释:** 测试名 = 场景, 如 `test_wrong_captcha_rejected`, 不叫 `test_2` / `test_case_b`。
 2. **一测一断言点:** 一个测试只验一个 scenario 的 checks; 不把三个 scenario 塞进一个测试函数。
 3. **可独立运行:** 不依赖其它测试的执行顺序、不依赖外部可变状态; 需要的前置自己 setup。
-4. **断言对齐 planned checks:** 测试里断言的字段/值, 与 planned `checks` 一一对应 (`reason == 'captcha_invalid'` → 测试断言同一字段同一值)。
+4. **断言对齐 scenario 的领域细节, 结果落到 case:** planned `checks` 只断言 case 结果 (`passed == true/false`, 可选 `'xxx' in failure_reason`), **领域字段值 (如 `reason == 'captcha_invalid'`) 由你在测试代码内断言, 对齐 scenario 里写明的领域细节**。测试判定后落到 `passed`; 若是负路径且 planned checks 用了 `'xxx' in failure_reason`, 失败/拒绝时把该关键标识 (如 `captcha_invalid`) 写进 `failure_reason`, 让子串断言可判。
 5. **跟随仓库既有测试风格:** 框架 (pytest/junit/...)、目录、fixture 用法跟现有代码一致, 不自带一套。
 
 **反例:** 测试名 `test_login`; 一个函数里断言 5 个不相干的事; 用 `sleep` 等时序; 断言 `assert result` (没说断言什么)。

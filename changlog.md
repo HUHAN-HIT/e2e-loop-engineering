@@ -3,6 +3,44 @@
 本文件记录 Loop Engineering 工程的版本演进。版本号对齐 `core/manifest.json`。
 每条修改登记在该版本下, 按"新增 / 修复 / 移除 / 文档"分类。
 
+## 1.1.1 (2026-07-02)
+
+### 修复 — actual_writes OOB 误报 (2026-07-02)
+
+`packages/ssot-ts/src/dispatch/collect.ts` 的 `collectActualWrites` 补齐 `isHarnessInternal`
+过滤, 与 `@e2e-loop/shared` 的 `computeActualWrites` 对齐 —— worker 写入自身 `runs/<id>/tasks/...`
+的 artifact (test-results.yaml / summary.md / key-diffs.yaml 等) 不再被判越界 (OOB)。
+
+### 修复 — checks 引用领域字段导致 run 死锁 (2026-07-02)
+
+case 输出 schema 被 `.strict()` 冻结为 `{id, passed, failure_reason}` 三字段, 但历史文档普遍
+教 plan-agent 让 checks 引用领域字段 (如 `ok == true` / `reason == 'captcha_invalid'` /
+`blocked_reasons == []`), 这类 check 求值时判 "unknown field" → 全 case fail → run 死锁。修复:
+
+- **plan_check 新增前置门 `case_checks_grammar`**: PLANNING 阶段就拒绝 `lhs` 不在
+  `{id, passed, failure_reason}` 的 check, 让死锁在计划阶段暴露而非拖到 IMPLEMENTING。
+- **checks_eval 的 `in` / `not in` 支持对 `failure_reason` 字符串做子串判定**:
+  负路径可写 `"'captcha_invalid' in failure_reason"`。
+
+### 文档 — 收敛 checks 模型自相矛盾 (2026-07-02)
+
+面向 plan-agent 的文档层此前普遍教"checks 引用领域字段", 与已冻结的三字段 schema 自相矛盾。
+本轮把 design §3.1 / craft 标准层 / 子 agent 提示词全部对齐正确模型 —— **领域断言写进 worker
+测试代码 (对齐写具体的 scenario), 由 worker 判定后落到 `passed`; checks 只引用固定三字段**
+(正路径 `passed == true`, 负路径 `passed == false` + 可选 `'xxx' in failure_reason`)。涉及:
+
+- `docs/loop-engineering-collaborative-design.md` §3.1 (规范源): 示例 checks 改写 + 文法白名单
+  lhs 描述限定为三字段 + 补 `case_checks_grammar` 前置门与 failure_reason 子串支持说明。
+- `core/standards/test-design-standard.md`: §1 lhs 定义、§3 反例表 (改为"scenario 写具体 +
+  checks 断言 passed/failure_reason", 保留模糊表述不合格纪律)、worked example 改写。
+- `core/standards/plan-standard.md`: 示例 task-plan 全部 checks 改为 passed/failure_reason 形式,
+  领域断言移进 scenario。
+- `core/standards/implementation-standard.md`: "断言对齐 planned checks" 一条改为"领域断言写进
+  测试代码、结果落 passed / 失败标识落 failure_reason"。
+- `core/subagents/plan-agent.md`、`docs/loop-engineering-prompts.md`: lhs 定义限定三字段 +
+  领域断言由 passed 承载 + 负路径 failure_reason 子串 + plan_check 前置拒绝提示。
+- `core/coordinator.md`、`docs/loop-engineering-master-prompt.md`: 示例 checks 改写。
+
 ## 1.1.0 (2026-07-01)
 
 ### 新增 — plan 拍板条件锚点化 (simple 免签) (2026-07-01)

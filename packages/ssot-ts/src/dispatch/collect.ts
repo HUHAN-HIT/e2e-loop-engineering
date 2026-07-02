@@ -22,7 +22,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { tryGitDiff } from "@e2e-loop/shared";
+import { tryGitDiff, isHarnessInternal } from "@e2e-loop/shared";
 
 import { checkTask } from "../checklists/task_check.js";
 import type { OOBDetection, TaskCheckResult } from "../checklists/task_check.js";
@@ -187,6 +187,14 @@ export function collectViaFsSnapshot(
  * 3. 否则回退 workerSelfReport (非 authoritative)。
  *
  * 缺输入时优雅降级 (例如 git_diff=true 但 baseRef=null → 走 fs 或 self_report)。
+ *
+ * harness 自身 bootstrap 产物过滤 (与 shared 的 computeActualWrites 对齐):
+ * worker 的强制产物 (summary.md/test-results.yaml/key-diffs.yaml) 落在 worktree 里的
+ * runs/<id>/tasks/<tid>/ 下, git status 会把整个 untracked 的 runs/ 折叠成一条 "runs/"
+ * 被采进来, detectOutOfBounds 拿它比对 allowed_write_paths → 误判越界。根因说明见
+ * shared/harness_paths.ts。故三层 (git_diff/fs_snapshot/worker_self_report) 返回的 writes
+ * 一律先经 isHarnessInternal 过滤掉 harness 内部路径 (runs/ .claude/ .opencode/
+ * .loop-engineering/ .worktrees/ resume.*)。source / is_authoritative 保持不变。
  */
 export function collectActualWrites(
   workdir: string,
@@ -207,19 +215,29 @@ export function collectActualWrites(
   if (capabilities.git_diff && baseRef) {
     const writes = tryGitDiff(workdir, baseRef);
     if (writes !== null) {
-      return { task_id: taskId, source: "git_diff", writes, is_authoritative: true };
+      return {
+        task_id: taskId,
+        source: "git_diff",
+        writes: writes.filter((p) => !isHarnessInternal(p)),
+        is_authoritative: true,
+      };
     }
   }
 
   if (capabilities.fs_snapshot && beforeSnapshot !== null && afterSnapshot !== null) {
     const writes = collectViaFsSnapshot(beforeSnapshot, afterSnapshot);
-    return { task_id: taskId, source: "fs_snapshot", writes, is_authoritative: true };
+    return {
+      task_id: taskId,
+      source: "fs_snapshot",
+      writes: writes.filter((p) => !isHarnessInternal(p)),
+      is_authoritative: true,
+    };
   }
 
   return {
     task_id: taskId,
     source: "worker_self_report",
-    writes: [...(workerSelfReport ?? [])],
+    writes: [...(workerSelfReport ?? [])].filter((p) => !isHarnessInternal(p)),
     is_authoritative: false,
   };
 }

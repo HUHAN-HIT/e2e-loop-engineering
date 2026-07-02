@@ -299,8 +299,10 @@ export class Coordinator {
   }
 
   /**
-   * plan agent 提交: 跑 plan_check, 通过则 set human_pending=plan_signoff。
+   * plan agent 提交: 跑 plan_check。
    *
+   * 通过后: simple 且未触发风险闸(risk:high / exclusive / 契约)、未强制 require_plan_signoff
+   *   → 免签自动 advance 到 IMPLEMENTING 并写 plan-auto-accepted.json; 否则 set human_pending=plan_signoff。
    * 不通过 → 写 plan + plan-check-failures.json, 保留 PLANNING (让 agent 重交), 不 advance。
    */
   submitPlan(plan: TaskPlan): void {

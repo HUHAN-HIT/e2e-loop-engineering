@@ -343,7 +343,7 @@ beforeAll(() => {
   execSync("npm run build", { cwd: REPO_ROOT, stdio: "pipe" });
 }, 30000);
 
-test("[CLI 入口端到端] node 跑 dist/index.js: init→plan→signoff-plan→run, 产物落盘 + phase 迁移", () => {
+test("[CLI 入口端到端] node 跑 dist/index.js: init→plan(免签)→run, 产物落盘 + phase 迁移", () => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "loop-cli-e2e-"));
   try {
     const reqPath = path.join(SMOKE, "req.md");
